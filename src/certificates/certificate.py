@@ -1,13 +1,15 @@
 import base64
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class Certificate(BaseModel):
     identity: str
-    public_signing_key: str  # Base64-encoded Ed25519 public key
+    public_signing_key: str  # b64
     issuer: str
-    signature: str  # Base64-encoded CA signature over (identity || public_signing_key)
+    signature: str  # b64
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @property
     def public_signing_key_bytes(self) -> bytes:

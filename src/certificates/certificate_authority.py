@@ -1,15 +1,22 @@
 import base64
 from abc import ABC, abstractmethod
+from typing import Any
 
 from nacl.signing import SigningKey, VerifyKey
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.model.certificate import Certificate
+from certificates.certificate import Certificate
 
 
 class CertificateAuthority(BaseModel, ABC):
-    signing_key: SigningKey
-    verify_key: VerifyKey
+    signing_key: SigningKey = Field(default_factory=lambda: SigningKey.generate())
+    verify_key: VerifyKey = None  # type: ignore
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        self.verify_key = self.signing_key.verify_key
 
     @abstractmethod
     def issue_certificate(self, identity: str, public_signing_key: bytes) -> Certificate:
