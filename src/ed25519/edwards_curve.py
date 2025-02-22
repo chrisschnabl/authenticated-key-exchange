@@ -1,8 +1,8 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 
-from curve import AffinePoint, DoubleAndAddCurve, Point
-from util import modinv
+from ed25519.curve import AffinePoint, DoubleAndAddCurve, Point
+from ed25519.util import modinv
 
 
 @dataclass

@@ -1,7 +1,7 @@
-from curve import AffinePoint, IdentityPoint, Point
 from ed25519.affine_edwards_curve import AffineEdwardsCurve
+from ed25519.curve import AffinePoint, IdentityPoint, Point
 from ed25519.edwards_curve import ExtendedPoint
-from util import projective_to_affine
+from ed25519.util import projective_to_affine
 
 
 class ExtendedEdwardsCurve(AffineEdwardsCurve):  # type: ignore

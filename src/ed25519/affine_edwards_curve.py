@@ -1,8 +1,8 @@
 from typing import override
 
-from curve import AffinePoint, IdentityPoint, Point
+from ed25519.curve import AffinePoint, IdentityPoint, Point
 from ed25519.edwards_curve import EdwardsCurve
-from util import modinv, sqrt_mod
+from ed25519.util import modinv, sqrt_mod
 
 
 class AffineEdwardsCurve(EdwardsCurve):  # type: ignore
