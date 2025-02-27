@@ -13,7 +13,7 @@ class Certificate(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-
+# TODO Use this actually
 class VerifiedCertificate(Certificate):
     pass
 

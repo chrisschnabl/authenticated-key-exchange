@@ -136,7 +136,6 @@ class VerifiedUser(BaseModel):
     identity: str
     ca: CertificateAuthority
     signing_key: PydanticSigningKey
-    verify_key: PydanticVerifyKey
     certificate: Certificate
     network: Any
     
@@ -176,16 +175,18 @@ class VerifiedUser(BaseModel):
 # Ready User with Established Session
 # ------------------------------------------------------------------------------
 
-class ReadyUser(VerifiedUser):
+class ReadyUser(BaseModel):
     """User with an established secure session."""
+    identity: str
     peer: str
     session_key: bytes
+    network: Any
     
     def send_secure_message(self, message: bytes) -> None:
         """Send an encrypted message using the established session key."""
         box = SecretBox(self.session_key)
         encrypted = box.encrypt(message)
-        # Use some application-specific message format
+
         self.network.send_encrypted(self.identity, self.peer, encrypted)
     
     def receive_secure_message(self, encrypted: bytes) -> bytes:
@@ -329,13 +330,9 @@ class InitiatorWaiting(BaseModel):
         # Transition to ready state
         ready_user = ReadyUser(
             identity=self.identity,
-            ca=self.ca,
-            signing_key=self.signing_key,
-            verify_key=self.certificate.public_signing_key,
-            certificate=self.certificate,
-            network=self.network,
             peer=self.peer,
             session_key=derived_key,
+            network=self.network,
         )
         
         return msg3, ready_user
@@ -350,7 +347,7 @@ class ResponderWaiting(BaseModel):
     identity: str
     certificate: Certificate
     ca: CertificateAuthority
-    signing_key: PydanticSigningKey
+    signing_key: PydanticSigningKey  # TODO: maybe remove this
     network: Any
     peer: str
     
@@ -378,7 +375,7 @@ class ResponderWaiting(BaseModel):
             received_nonce +
             nonce
         )
-        
+
         # Sign transcript and compute MAC
         sig = sign_transcript(self.signing_key, transcript)
         mac_val = hmac.new(derived_key, transcript, hashlib.sha256).digest()
@@ -410,9 +407,7 @@ class ResponderWaiting(BaseModel):
         # Transition to waiting for message 3
         return msg2, ResponderWaitingForMsg3(
             identity=self.identity,
-            certificate=self.certificate,
             ca=self.ca,
-            signing_key=self.signing_key,
             network=self.network,
             peer=self.peer,
             received_ephemeral_pub=received_ephem,
@@ -426,10 +421,8 @@ class ResponderWaiting(BaseModel):
 class ResponderWaitingForMsg3(BaseModel):
     """Responder waiting for message 3 from initiator."""
     identity: str
-    certificate: Certificate
     ca: CertificateAuthority
-    signing_key: PydanticSigningKey
-    network: Any
+    network: Any # TODO: maybe remove this
     peer: str
     received_ephemeral_pub: PydanticPublicKey
     received_nonce: bytes
@@ -486,11 +479,7 @@ class ResponderWaitingForMsg3(BaseModel):
         
         return ReadyUser(
             identity=self.identity,
-            ca=self.ca,
-            signing_key=self.signing_key,
-            verify_key=self.certificate.public_signing_key,
-            certificate=self.certificate,
-            network=self.network,
-            peer=payload.initiator_identity,
+            peer=self.peer,
             session_key=self.derived_key,
+            network=self.network,
         )
