@@ -4,9 +4,7 @@ from typing import TypeAlias
 
 from pydantic import BaseModel
 
-from sigma.messages import SigmaMessage
-
-OnReceive: TypeAlias = Callable[[SigmaMessage, str], None]
+OnReceive: TypeAlias = Callable[[BaseModel, str], None]
 on_receive_ignore: OnReceive = lambda _: None
 
 

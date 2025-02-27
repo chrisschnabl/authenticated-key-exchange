@@ -14,8 +14,8 @@ from nacl.secret import SecretBox
 from nacl.signing import SigningKey, VerifyKey
 from pydantic import BaseModel, ConfigDict
 
-from certificates.ca import Certificate, CertificateAuthority
-from crypto import sign_transcript, verify_signature
+from sigma.ca import Certificate, CertificateAuthority
+from crypto_utils import sign_transcript, verify_signature
 from msgs import (
     CertificatePayload,
     SigmaInitiatorPayload,

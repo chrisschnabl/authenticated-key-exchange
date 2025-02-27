@@ -4,12 +4,11 @@ from pydantic import BaseModel
 from msgs import SigmaMessage1, SigmaMessage3
 from network.simulated_network import SimulatedNetwork
 from sigma.user import Uncertified, User
+from sigma.ca import CertificateAuthority
 
 
 def main():
     ca_signing_key = SigningKey.generate()
-    from certificates.ca import CertificateAuthority  # Import from ca.py
-
     ca = CertificateAuthority(ca_signing_key)
 
     network = SimulatedNetwork()
