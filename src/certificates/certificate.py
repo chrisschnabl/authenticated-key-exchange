@@ -3,8 +3,10 @@ import base64
 from pydantic import BaseModel, ConfigDict
 
 
+# TODO: mention how you get form this to a better implementatio in overleafe
 class Certificate(BaseModel):
     identity: str
+    # TODO: have typing here for the key
     public_signing_key: str  # b64
     issuer: str
     signature: str  # b64

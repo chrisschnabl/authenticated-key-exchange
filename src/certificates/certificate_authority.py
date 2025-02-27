@@ -1,8 +1,7 @@
 import base64
-from abc import ABC, abstractmethod
-from typing import Any
+from abc import ABC
 
-from nacl.signing import SigningKey, VerifyKey
+from nacl.signing import SigningKey
 from pydantic import BaseModel, ConfigDict, Field
 
 from certificates.certificate import Certificate
@@ -10,24 +9,31 @@ from certificates.certificate import Certificate
 
 class CertificateAuthority(BaseModel, ABC):
     signing_key: SigningKey = Field(default_factory=lambda: SigningKey.generate())
-    verify_key: VerifyKey = None  # type: ignore
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, **data: Any):
-        super().__init__(**data)
-        self.verify_key = self.signing_key.verify_key
+    def pre_issue_certificate(self, identity: str) -> None:
+        """
+        Generates a challenge using a nonce, timestamp, and identity.
+        The challenge is signed by the CA to ensure authenticity.
+        """
+        nonce = os.urandom(32)
+        timestamp = time.time()
 
-    @abstractmethod
-    def issue_certificate(self, identity: str, public_signing_key: bytes) -> Certificate:
-        raise NotImplementedError
+        # Create challenge message
+        challenge_data = identity.encode() + nonce + str(timestamp).encode()
 
-    @abstractmethod
-    def verify_certificate(self, cert: Certificate) -> bool:
-        raise NotImplementedError
+        # Sign the challenge using CA's private key
+        challenge_signature = self.signing_key.sign(challenge_data).signature
 
+        # Convert to base64
+        nonce_b64 = base64.b64encode(nonce).decode()
+        signature_b64 = base64.b64encode(challenge_signature).decode()
 
-class X25519CertificateAuthority(CertificateAuthority):
+        # Store nonce to prevent reuse
+        self.issued_nonces.add(nonce_b64)
+
+        # return Challenge(identity=identity, nonce=nonce_b64, timestamp=timestamp, signature=signature_b64)
+
     def issue_certificate(self, identity: str, public_signing_key: bytes) -> Certificate:
         data = identity.encode() + public_signing_key
         signature = self.signing_key.sign(data).signature

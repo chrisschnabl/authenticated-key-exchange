@@ -1,12 +1,12 @@
 from nacl.signing import SigningKey
 
-from certificates.certificate_authority import X25519CertificateAuthority
+from certificates.certificate_authority import CertificateAuthority
 from network.simulated_network import SimulatedNetwork
 from sigma.user import User
 
 
 def main():
-    ca = X25519CertificateAuthority()
+    ca = CertificateAuthority()
     # Generate long-term keys and certificates.
     alice_key = SigningKey.generate()
     ca.issue_certificate("Alice", alice_key.verify_key.encode())
@@ -19,14 +19,16 @@ def main():
     alice_proto = User(
         identity="Alice",
         ca=ca,
+        network=network,
     )
     bob_proto = User(
         identity="Bob",
         ca=ca,
+        network=network,
     )
 
-    network.register_user(alice_proto)
-    network.register_user(bob_proto)
+    network.register_user(alice_proto.identity, alice_proto.receive_message)
+    network.register_user(bob_proto.identity, bob_proto.receive_message)
 
     alice_proto.start_session("Bob")
 

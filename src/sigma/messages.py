@@ -1,13 +1,9 @@
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict
 
 from certificates.certificate import Certificate
 
 
 class SigmaMessage(BaseModel):
-    type: Literal["sigma1", "sigma2", "sigma3"]
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 

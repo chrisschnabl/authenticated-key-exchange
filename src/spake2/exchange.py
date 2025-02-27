@@ -13,9 +13,8 @@ curve = ExtendedEdwardsCurve()
 # ---------------------------------------------------------------------------
 # Global constants for SPAKE2.
 # G, M, and N are given in their 32-byte compressed forms.
-# Replace the dummy hex strings with the actual constants from RFC 9382.
 # ---------------------------------------------------------------------------
-G_COMPRESSED = bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666")
+G_COMPRESSED = bytes.fromhex("G")
 M_COMPRESSED = bytes.fromhex("d048032c6ea0b6d697ddc2e86bda85a33adac920f1bf18e1b0c6d166a5cecdaf")
 N_COMPRESSED = bytes.fromhex("d3bfb518f44f3430f29d0c92af503865a1ed3281dc69b35dd868ba85f886c4ab")
 

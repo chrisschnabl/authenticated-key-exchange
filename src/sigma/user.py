@@ -1,199 +1,370 @@
-# user.py
+from __future__ import annotations
+
 import base64
-import hashlib  # TODO rpelace with other
+import hashlib
 import hmac
+import os
 from functools import singledispatchmethod
+from typing import Any, Generic, TypeVar
 
 from nacl.bindings import crypto_scalarmult
+from nacl.exceptions import CryptoError
 from nacl.public import PrivateKey, PublicKey
+from nacl.secret import SecretBox
 from nacl.signing import SigningKey, VerifyKey
-from pydantic import ConfigDict
+from pydantic import BaseModel, ConfigDict
 
-from certificates.certificate import Certificate
-from certificates.certificate_authority import CertificateAuthority
-from network.simulated_network import NetworkParticipant, SimulatedNetwork
-from sigma.messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
-from sigma.session import SigmaSession
-
-
-def derive_session_key(shared_secret: bytes) -> bytes:
-    return hashlib.sha256(shared_secret).digest()
-
-
-def compute_hmac(key: bytes, data: bytes) -> bytes:
-    return hmac.new(key, data, hashlib.sha256).digest()
+from certificates.ca import Certificate, CertificateAuthority
+from crypto import sign_transcript, verify_signature
+from msgs import (
+    CertificatePayload,
+    SigmaInitiatorPayload,
+    SigmaMessage1,
+    SigmaMessage2,
+    SigmaMessage3,
+    SigmaResponderPayload,
+)
 
 
-def sign_transcript(signing_key: SigningKey, transcript: bytes) -> bytes:
-    return signing_key.sign(transcript).signature
+# -----------------------------
+# Marker classes for states
+class Uncertified:
+    pass
 
 
-def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: bytes) -> bool:
-    try:
-        verify_key.verify(transcript, signature)
-        return True
-    except Exception:
-        return False
+class Certified:
+    pass
 
 
-class User(NetworkParticipant):
+class InitiatorInitial:
+    pass
+
+
+class InitiatorWaiting:
+    pass
+
+
+class InitiatorFinal:
+    pass
+
+
+class ResponderReceived:
+    pass
+
+
+class ResponderResponding:
+    pass
+
+
+class ResponderFinal:
+    pass
+
+
+# Type variables for generics
+SUser = TypeVar("SUser")
+TInitiator = TypeVar("TInitiator")
+TResponder = TypeVar("TResponder")
+
+# -----------------------------
+# User pre-handshake state using generics
+
+
+class User(BaseModel, Generic[SUser]):
     identity: str
     ca: CertificateAuthority
     signing_key: SigningKey
     verify_key: VerifyKey
-    certificate: Certificate
-    ephemeral_private: PrivateKey | None = None
-    ephemeral_public: PublicKey | None = None
-    nonce: bytes | None = None
-    session_key: bytes | None = None
-    network: SimulatedNetwork | None = None
-    sessions: dict[str, SigmaSession] = {}
-
+    certificate: Certificate | None = None
+    network: Any
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, identity: str, ca: CertificateAuthority):
-        signing_key = SigningKey.generate()
-        verify_key = signing_key.verify_key
-        certificate = ca.issue_certificate(identity, bytes(verify_key))
-        super().__init__(
-            identity=identity,
-            ca=ca,
-            signing_key=signing_key,
-            verify_key=verify_key,
-            certificate=certificate,
+    def obtain_certificate(self: User[Uncertified]) -> User[Certified]:
+        challenge = self.ca.generate_challenge()
+        sig = self.signing_key.sign(challenge).signature
+        self.ca.verify_challenge(challenge, sig, self.verify_key)
+        cert = self.ca.issue_certificate(self.identity, self.verify_key)
+        self.certificate = cert
+        return self  # Now in Certified state.
+
+    def initiate_sigma(self: User[Certified], peer: str) -> SigmaInitiator[InitiatorInitial]:
+        ephemeral_private = PrivateKey.generate()
+        ephemeral_public = ephemeral_private.public_key
+        nonce = os.urandom(16)
+        return SigmaInitiator[InitiatorInitial](
+            identity=self.identity,
+            certificate=self.certificate,
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=peer,
+            ephemeral_private=ephemeral_private,
+            ephemeral_public=ephemeral_public,
+            nonce=nonce,
         )
 
-    def get_ephemeral_pub_b64(self) -> str:
-        if self.ephemeral_public is None:
-            raise ValueError("Ephemeral public key not set")
-        return base64.b64encode(bytes(self.ephemeral_public)).decode()
-
-    def get_nonce_b64(self) -> str:
-        if self.nonce is None:
-            raise ValueError("Nonce not set")
-        return base64.b64encode(self.nonce).decode()
-
-    def start_session(self, peer: str):
-        """Start the SIGMA handshake with peer."""
-        self.sessions[peer] = SigmaSession(user=self.identity, peer=peer, role="initiator")
-        self.sessions[peer].generate_ephemeral()
-
-        msg1 = SigmaMessage1(
-            type="sigma1",
-            ephemeral_pub=base64.b64encode(bytes(self.sessions[peer].ephemeral_public)).decode(),
-            nonce=base64.b64encode(self.sessions[peer].nonce).decode(),
+    def wait_for_sigma(self: User[Certified], peer: str) -> SigmaResponder[ResponderReceived]:
+        return SigmaResponder[ResponderReceived](
+            identity=self.identity,
+            certificate=self.certificate,
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=peer,
         )
-        self.network.send_message(self.identity, peer, msg1)
+
+
+# -----------------------------
+# SIGMA-I Initiator state using generics
+
+
+class SigmaInitiator(BaseModel, Generic[TInitiator]):
+    identity: str
+    certificate: Certificate
+    ca: CertificateAuthority
+    signing_key: SigningKey
+    network: Any
+    peer: str
+    # Fields for the initial state:
+    ephemeral_private: PrivateKey | None = None  # Only in InitiatorInitial
+    ephemeral_public: PublicKey
+    nonce: bytes
+    # Fields populated after processing message2 (Waiting state):
+    derived_key: bytes | None = None  # Ke (32 bytes)
+    responder_ephemeral_pub: PublicKey | None = None
+    responder_nonce: bytes | None = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @singledispatchmethod
-    def receive_message(self, message: any, sender: str) -> None:
-        raise NotImplementedError("Cannot receive message of this type")
-
-    @receive_message.register
-    def _(self, message: SigmaMessage1, sender: str) -> None:
-        if sender not in self.sessions:
-            self.sessions[sender] = SigmaSession(user=self.identity, peer=sender, role="responder")
-        session = self.sessions[sender]
-        msg: SigmaMessage1 = message
-
-        # Save initiator’s ephemeral and nonce to use in the transcript
-        session.remote_ephemeral_pub = PublicKey(base64.b64decode(msg.ephemeral_pub))
-        session.remote_nonce = base64.b64decode(msg.nonce)
-        session.generate_ephemeral()
-
-        shared_secret = crypto_scalarmult(
-            bytes(session.ephemeral_private), bytes(session.remote_ephemeral_pub)
-        )
-        session.session_key = derive_session_key(shared_secret)
-
-        # transcript =
-        # initiator_ephemeral || responder_ephemeral || initiator_nonce || responder_nonce
-        transcript = (
-            bytes(session.remote_ephemeral_pub)
-            + bytes(session.ephemeral_public)
-            + session.remote_nonce
-            + session.nonce
-        )
-
-        # Sign transcript and compute HMAC
-        sig = sign_transcript(self.signing_key, transcript)
-        hmac_val = compute_hmac(session.session_key, transcript)
-        msg2 = SigmaMessage2(
-            type="sigma2",
-            ephemeral_pub=base64.b64encode(bytes(session.ephemeral_public)).decode(),
-            nonce=base64.b64encode(session.nonce).decode(),
-            certificate=self.certificate,
-            signature=base64.b64encode(sig).decode(),
-            hmac=base64.b64encode(hmac_val).decode(),
-        )
-        self.network.send_message(self.identity, sender, msg2)
+    def receive_message(self, message: Any, sender: str) -> None:
+        raise NotImplementedError("Message type not handled in this state.")
 
     @receive_message.register
     def _(self, message: SigmaMessage2, sender: str) -> None:
-        if sender not in self.sessions or self.sessions[sender].role != "initiator":
-            raise Exception("No initiator session exists for processing sigma2")
-        session = self.sessions[sender]
-        msg: SigmaMessage2 = message
+        new_state = self.process_message2(message)
+        new_state.send_message3()
 
-        session.remote_ephemeral_pub = PublicKey(base64.b64decode(msg.ephemeral_pub))
-        session.remote_nonce = base64.b64decode(msg.nonce)
+    def send_message1(self: SigmaInitiator[InitiatorInitial]) -> None:
+        msg1 = SigmaMessage1(ephemeral_pub=self.ephemeral_public, nonce=self.nonce)
+        self.network.send_message(self.identity, self.peer, msg1)
 
-        shared_secret = crypto_scalarmult(
-            bytes(session.ephemeral_private), bytes(session.remote_ephemeral_pub)
+    def process_message2(
+        self: SigmaInitiator[InitiatorInitial], msg2: SigmaMessage2
+    ) -> SigmaInitiator[InitiatorWaiting]:
+        resp_ephem = msg2.ephemeral_pub
+        shared_secret = crypto_scalarmult(bytes(self.ephemeral_private), bytes(resp_ephem))
+        derived_key = hashlib.sha256(shared_secret).digest()
+        box = SecretBox(derived_key)
+        try:
+            decrypted = box.decrypt(msg2.encrypted_payload)
+        except CryptoError as e:
+            raise ValueError("Decryption failed") from e
+        payload = SigmaResponderPayload.parse_raw(decrypted)
+        cert_dict = payload.certificate.dict()
+        responder_cert = Certificate(
+            identity=payload.responder_identity,
+            public_signing_key=VerifyKey(base64.b64decode(cert_dict["public_signing_key"])),
+            issuer=cert_dict["issuer"],
+            signature=base64.b64decode(cert_dict["signature"]),
         )
-        session.session_key = derive_session_key(shared_secret)
-
-        # Reconstruct transcript:
-        # initiator_ephemeral || responder_ephemeral || initiator_nonce || responder_nonce
+        verified_cert = self.ca.verify_certificate(responder_cert)
         transcript = (
-            bytes(session.ephemeral_public)
-            + bytes(session.remote_ephemeral_pub)
-            + session.nonce
-            + session.remote_nonce
+            self.ephemeral_public.encode()
+            + resp_ephem.encode()
+            + self.nonce
+            + base64.b64decode(payload.nonce)
         )
-
-        # Verify responder’s certificate, signature, and HMAC
-        if not self.ca.verify_certificate(msg.certificate):
-            raise Exception(f"Responder certificate verification failed for {sender}")
-        responder_verify_key = VerifyKey(base64.b64decode(msg.certificate.public_signing_key))
-        if not verify_signature(responder_verify_key, transcript, base64.b64decode(msg.signature)):
-            raise Exception("Responder signature verification failed")
-
-        expected_hmac = compute_hmac(session.session_key, transcript)
-        if not hmac.compare_digest(expected_hmac, base64.b64decode(msg.hmac)):
-            raise Exception(f"Responder HMAC verification failed for {sender}")
-
-        sig = sign_transcript(self.signing_key, transcript)
-        hmac_val = compute_hmac(session.session_key, transcript)
-        msg3 = SigmaMessage3(
-            type="sigma3",
+        if not verify_signature(
+            verified_cert.public_signing_key, transcript, base64.b64decode(payload.signature)
+        ):
+            raise ValueError("Responder signature verification failed")
+        expected_mac = hmac.new(derived_key, transcript, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected_mac, base64.b64decode(payload.mac)):
+            raise ValueError("Responder MAC verification failed")
+        return SigmaInitiator[InitiatorWaiting](
+            identity=self.identity,
             certificate=self.certificate,
-            signature=base64.b64encode(sig).decode(),
-            hmac=base64.b64encode(hmac_val).decode(),
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=self.peer,
+            ephemeral_public=self.ephemeral_public,
+            nonce=self.nonce,
+            derived_key=derived_key,
+            responder_ephemeral_pub=resp_ephem,
+            responder_nonce=base64.b64decode(payload.nonce),
         )
-        self.network.send_message(self.identity, sender, msg3)
+
+    def send_message3(self: SigmaInitiator[InitiatorWaiting]) -> SigmaInitiator[InitiatorFinal]:
+        transcript = (
+            self.responder_ephemeral_pub.encode()
+            + self.ephemeral_public.encode()
+            + self.responder_nonce
+            + self.nonce
+        )
+        sig = sign_transcript(self.signing_key, transcript)
+        mac_val = hmac.new(self.derived_key, transcript, hashlib.sha256).digest()
+        payload = SigmaInitiatorPayload(
+            initiator_identity=self.identity,
+            certificate=CertificatePayload(
+                identity=self.certificate.identity,
+                public_signing_key=base64.b64encode(
+                    self.certificate.public_signing_key.encode()
+                ).decode(),
+                issuer=self.certificate.issuer,
+                signature=base64.b64encode(self.certificate.signature).decode(),
+            ),
+            signature=base64.b64encode(sig).decode(),
+            mac=base64.b64encode(mac_val).decode(),
+        )
+        plaintext = payload.json().encode()
+        box = SecretBox(self.derived_key)
+        encrypted = box.encrypt(plaintext)
+        msg3 = SigmaMessage3(encrypted_payload=encrypted)
+        self.network.send_message(self.identity, self.peer, msg3)
+        return SigmaInitiator[InitiatorFinal](
+            identity=self.identity,
+            certificate=self.certificate,
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=self.peer,
+            ephemeral_public=self.ephemeral_public,
+            nonce=self.nonce,
+            derived_key=self.derived_key,
+        )
+
+
+# -----------------------------
+# SIGMA-I Responder state using generics
+
+
+class SigmaResponder(BaseModel, Generic[TResponder]):
+    identity: str
+    certificate: Certificate
+    ca: CertificateAuthority
+    signing_key: SigningKey
+    network: Any
+    peer: str
+    # Fields from received message1:
+    received_ephemeral_pub: PublicKey | None = None
+    received_nonce: bytes | None = None
+    # Responder's own ephemeral values:
+    ephemeral_private: PrivateKey | None = None  # will be dropped after shared secret derivation
+    ephemeral_public: PublicKey | None = None
+    nonce: bytes | None = None  # responder's nonce
+    derived_key: bytes | None = None  # Ke
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @singledispatchmethod
+    def receive_message(self, message: Any, sender: str) -> None:
+        raise NotImplementedError("Message type not handled in this state.")
+
+    @receive_message.register
+    def _(self, message: SigmaMessage1, sender: str) -> None:
+        new_state = self.process_message1(message)
+        new_state.send_message2()
 
     @receive_message.register
     def _(self, message: SigmaMessage3, sender: str) -> None:
-        if sender not in self.sessions or self.sessions[sender].role != "responder":
-            raise Exception("No responder session exists for processing sigma3")
-        session = self.sessions[sender]
-        msg: SigmaMessage3 = message
+        # Use the final state to process message3.
+        self.process_message3(message)
 
-        transcript = (
-            bytes(session.remote_ephemeral_pub)
-            + bytes(session.ephemeral_public)
-            + session.remote_nonce
-            + session.nonce
+    def process_message1(
+        self: SigmaResponder[ResponderReceived], msg1: SigmaMessage1
+    ) -> SigmaResponder[ResponderResponding]:
+        received_ephem = msg1.ephemeral_pub
+        received_nonce = msg1.nonce
+        ephemeral_private = PrivateKey.generate()
+        ephemeral_public = ephemeral_private.public_key
+        nonce = os.urandom(16)
+        shared_secret = crypto_scalarmult(bytes(ephemeral_private), bytes(received_ephem))
+        derived_key = hashlib.sha256(shared_secret).digest()
+        transcript = received_ephem.encode() + ephemeral_public.encode() + received_nonce + nonce
+        return SigmaResponder[ResponderResponding](
+            identity=self.identity,
+            certificate=self.certificate,
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=self.peer,
+            received_ephemeral_pub=received_ephem,
+            received_nonce=received_nonce,
+            ephemeral_private=ephemeral_private,
+            ephemeral_public=ephemeral_public,
+            nonce=nonce,
+            derived_key=derived_key,
         )
 
-        if not self.ca.verify_certificate(msg.certificate):
-            raise Exception("Initiator certificate verification failed")
-        initiator_verify_key = VerifyKey(base64.b64decode(msg.certificate.public_signing_key))
-        if not verify_signature(initiator_verify_key, transcript, base64.b64decode(msg.signature)):
-            raise Exception("Initiator signature verification failed")
-        expected_hmac = compute_hmac(session.session_key, transcript)
-        if not hmac.compare_digest(expected_hmac, base64.b64decode(msg.hmac)):
-            raise Exception("Initiator HMAC verification failed")
+    def send_message2(self: SigmaResponder[ResponderResponding]) -> SigmaResponder[ResponderFinal]:
+        transcript = (
+            self.received_ephemeral_pub.encode()
+            + self.ephemeral_public.encode()
+            + self.received_nonce
+            + self.nonce
+        )
+        sig = sign_transcript(self.signing_key, transcript)
+        mac_val = hmac.new(self.derived_key, transcript, hashlib.sha256).digest()
+        payload = SigmaResponderPayload(
+            nonce=base64.b64encode(self.nonce).decode(),
+            responder_identity=self.identity,
+            certificate=CertificatePayload(
+                identity=self.certificate.identity,
+                public_signing_key=base64.b64encode(
+                    self.certificate.public_signing_key.encode()
+                ).decode(),
+                issuer=self.certificate.issuer,
+                signature=base64.b64encode(self.certificate.signature).decode(),
+            ),
+            signature=base64.b64encode(sig).decode(),
+            mac=base64.b64encode(mac_val).decode(),
+        )
+        plaintext = payload.json().encode()
+        box = SecretBox(self.derived_key)
+        encrypted = box.encrypt(plaintext)
+        msg2 = SigmaMessage2(ephemeral_pub=self.ephemeral_public, encrypted_payload=encrypted)
+        self.network.send_message(self.identity, self.peer, msg2)
+        return SigmaResponder[ResponderFinal](
+            identity=self.identity,
+            certificate=self.certificate,
+            ca=self.ca,
+            signing_key=self.signing_key,
+            network=self.network,
+            peer=self.peer,
+            received_ephemeral_pub=self.received_ephemeral_pub,
+            received_nonce=self.received_nonce,
+            ephemeral_public=self.ephemeral_public,
+            nonce=self.nonce,
+            derived_key=self.derived_key,
+        )
 
-        # (Following this, secure messaging can take place using the session key.)
+    def process_message3(self: SigmaResponder[ResponderFinal], msg3: SigmaMessage3) -> None:
+        box = SecretBox(self.derived_key)
+        try:
+            plaintext = box.decrypt(msg3.encrypted_payload)
+        except CryptoError as e:
+            raise ValueError("Decryption of message 3 failed") from e
+        payload = SigmaInitiatorPayload.parse_raw(plaintext)
+        cert_dict = payload.certificate.dict()
+        initiator_cert = Certificate(
+            identity=payload.initiator_identity,
+            public_signing_key=VerifyKey(base64.b64decode(cert_dict["public_signing_key"])),
+            issuer=cert_dict["issuer"],
+            signature=base64.b64decode(cert_dict["signature"]),
+        )
+        verified_cert = self.ca.verify_certificate(initiator_cert)
+        transcript = (
+            self.ephemeral_public.encode()
+            + self.received_ephemeral_pub.encode()
+            + self.nonce
+            + self.received_nonce
+        )
+        if not verify_signature(
+            verified_cert.public_signing_key, transcript, base64.b64decode(payload.signature)
+        ):
+            raise ValueError("Initiator signature verification failed")
+        expected_mac = hmac.new(self.derived_key, transcript, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected_mac, base64.b64decode(payload.mac)):
+            raise ValueError("Initiator MAC verification failed")
+        print(
+            f"Handshake complete between {self.peer} and {self.identity}. Session key established."
+        )

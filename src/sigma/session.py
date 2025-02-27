@@ -21,4 +21,4 @@ class SigmaSession(BaseModel):
     def generate_ephemeral(self) -> None:
         self.ephemeral_private = PrivateKey.generate()
         self.ephemeral_public = self.ephemeral_private.public_key
-        self.nonce = os.urandom(16)  # 16-byte nonce
+        self.nonce = os.urandom(16)  # 16-byte nonce, use secrets
