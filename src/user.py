@@ -34,11 +34,9 @@ class User(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def obtain_certificate(self) -> VerifiedUser:
-        challenge = self.ca.generate_challenge()
+        challenge = self.ca.generate_challenge(self.identity)
         sig = self.signing_key.sign(challenge).signature
-        verify_key = self.signing_key.verify_key
-        self.ca.verify_challenge(challenge, sig, verify_key)
-        cert = self.ca.issue_certificate(self.identity, verify_key)
+        cert = self.ca.issue_certificate(self.identity, sig, self.signing_key.verify_key)
         
         return VerifiedUser(
             identity=self.identity,
@@ -61,8 +59,6 @@ class VerifiedUser(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def initiate_handshake(self, peer: str) -> Tuple[SigmaMessage1, InitiatorWaiting]:
-        """Begin a handshake as the initiator."""
-        """Send message 1 and transition to waiting state."""
         ephemeral_private = PrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
@@ -81,8 +77,6 @@ class VerifiedUser(BaseModel):
     
     # TODO CS: think about a multi-session paradigm here
     def receive_message1(self, msg1: SigmaMessage1, sender: str) -> Tuple[SigmaMessage2, ResponderWaitingForMsg3]:
-        """Process message 1 and send message 2."""
-        # Extract initiator's ephemeral key and nonce
         received_ephem: PublicKey = msg1.ephemeral_pub
         received_nonce = msg1.nonce
         
@@ -90,10 +84,8 @@ class VerifiedUser(BaseModel):
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
         
-        # Compute shared secret and derive key
         derived_key = derive_key(received_ephem, ephemeral_private)
         
-        # Create transcript
         transcript = (
             received_ephem.encode() +
             ephemeral_public.encode() +
@@ -101,47 +93,35 @@ class VerifiedUser(BaseModel):
             nonce
         )
         
-        # Sign transcript and compute MAC
-        sig = sign_transcript(self.signing_key, transcript)
-        mac_val = hmac(transcript, derived_key)
-
-        # TODO CS: use pynacl for hmac
-        
-        # Create payload
         payload = SigmaResponderPayload(
             nonce=nonce,
             certificate=self.certificate,
-            signature=sig,
-            mac=mac_val,
+            signature=sign_transcript(self.signing_key, transcript),
+            mac=hmac(transcript, derived_key),
         )
         
-        # Encrypt and send message 2
-        # TODO CS: this is also annoying
         plaintext = pickle.dumps(payload)
-        box = SecretBox(derived_key)
-        encrypted = box.encrypt(plaintext)
         msg2 = SigmaMessage2(
             ephemeral_pub=ephemeral_public,
-            encrypted_payload=encrypted,
+            encrypted_payload=SecretBox(derived_key).encrypt(plaintext),
         )
 
-        responder_transcript = (
+        transcript_msg2 = (
             ephemeral_public.encode() +
             received_ephem.encode() +
             nonce +  
             received_nonce
         )
+
         return msg2, ResponderWaitingForMsg3(
             identity=self.identity,
             ca=self.ca,
             peer=sender,
-            transcript=responder_transcript,
+            transcript=transcript_msg2,
             derived_key=derived_key,
         )
 
-# ------------------------------------------------------------------------------
-# Ready User with Established Session
-# ------------------------------------------------------------------------------
+
 DerviedKey: TypeAlias = bytes
 
 class ReadyUser(BaseModel):
@@ -182,7 +162,6 @@ class InitiatorWaiting(BaseModel):
         resp_ephem: PublicKey = msg2.ephemeral_pub
         derived_key = derive_key(resp_ephem, self.ephemeral_private)
         
-        # Decrypt the payload
         box = SecretBox(derived_key)
         try:
             decrypted = box.decrypt(msg2.encrypted_payload)
@@ -192,7 +171,6 @@ class InitiatorWaiting(BaseModel):
         payload: SigmaInitiatorPayload = pickle.loads(decrypted)
         verified_cert = self.ca.verify_certificate(payload.certificate)
         
-        # Verify transcript signature
         transcript = (
             self.ephemeral_public.encode() +
             resp_ephem.encode() +
@@ -259,7 +237,7 @@ class ResponderWaitingForMsg3(BaseModel):
         except CryptoError as e:
             raise ValueError("Decryption of message 3 failed") from e
         
-        payload = pickle.loads(plaintext)
+        payload: SigmaInitiatorPayload = pickle.loads(plaintext)
         verified_cert = self.ca.verify_certificate(payload.certificate)
 
         if not verify_signature(

@@ -1,8 +1,10 @@
+import pickle
 import secrets
+from typing import TypeAlias
 
 from nacl.signing import SigningKey, VerifyKey
+from nacl.secret import SecretBox
 from pydantic import BaseModel
-
 from crypto_utils import Signature
 
 
@@ -20,32 +22,51 @@ class VerifiedCertificate(Certificate):
     pass
 
 
+Challenge: TypeAlias = bytes
+
 class CertificateAuthority:
     def __init__(self):
-        self.signing_key = SigningKey.generate()
-        self.verify_key = self.signing_key.verify_key
+        self._signing_key = SigningKey.generate()
+        self.verify_key = self._signing_key.verify_key
+        self._verified_users: dict[str, VerifyKey] = {}
+        self._challenges_pending: dict[str, Challenge] = {}
 
-    def generate_challenge(self) -> bytes:
-        return secrets.token_bytes(32)
+    def generate_challenge(self, user: str) -> bytes:
+        challenge = secrets.token_bytes(32)
+        self._challenges_pending[user] = challenge
+        return challenge
+        #return SecretBox(self._signing_key.encode()).encrypt(challenge)
+        # TODO CS AE
 
-    def verify_challenge(
-        self, challenge: bytes, signature: bytes, public_signing_key: VerifyKey
-    ) -> None:
+    def issue_certificate(
+        self, user: str,  signature: bytes, verify_key: VerifyKey
+    ) -> Certificate:
         # Verifies that the signature is a valid signature of the challenge using the provided public key.
-        public_signing_key.verify(challenge, signature)
-        # TOOD: imrpove this 
+        if user not in self._challenges_pending:
+            raise ValueError("User has not requested a challenge")
+        
+        challenge = self._challenges_pending[user]
+        del self._challenges_pending[user]
 
-    def issue_certificate(self, identity: str, verify_key: VerifyKey) -> Certificate:
-        data = identity.encode() + verify_key.encode()
-        signature: Signature = self.signing_key.sign(data).signature
-        return Certificate(
-            identity=identity,
+        if not verify_key.verify(challenge, signature):
+            raise ValueError("Invalid signature")
+
+        signature: Signature = self._signing_key.sign(user.encode() + verify_key.encode()).signature
+        
+        certificate = Certificate(
+            identity=user,
             verify_key=verify_key,
             signature=signature,
         )
+        self._verified_users[user] = verify_key
+        # TODO CS: encrypt this with the user's public key using pickle
+        #payload = pickle.dumps(certificate)
+        #return SecretBox(verify_key.encode()).encrypt(payload)
+        return certificate
 
+    
     def verify_certificate(self, cert: Certificate) -> VerifiedCertificate:
-        data = cert.identity.encode() + cert.verify_key.encode()
-        self.verify_key.verify(data, cert.signature)
-        # TODO: CS also check the idendity here
+        if cert.identity not in self._verified_users:
+            raise ValueError("User has not been verified")
+        
         return VerifiedCertificate(**cert.model_dump())
