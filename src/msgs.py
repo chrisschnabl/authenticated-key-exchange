@@ -7,7 +7,6 @@ from pydantic import BaseModel
 class CertificatePayload(BaseModel):
     identity: str
     verify_key: str  # base64-encoded
-    issuer: str
     signature: str  # base64-encoded
 
 

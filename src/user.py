@@ -160,6 +160,7 @@ class VerifiedUser(BaseModel):
             nonce=nonce,
         )
     
+    # TODO CS this is uesless
     def wait_for_handshake(self, peer: str) -> ResponderWaiting:
         """Set up as a responder waiting for a handshake."""
         return ResponderWaiting(
@@ -182,16 +183,16 @@ class ReadyUser(BaseModel):
     peer: str
     session_key: bytes
     network: Any
-    
+
     def send_secure_message(self, message: bytes) -> None:
-        """Send an encrypted message using the established session key."""
+        """Send an authenticated and encrypted message using the established session key."""
         box = SecretBox(self.session_key)
         encrypted = box.encrypt(message)
 
         self.network.send_encrypted(self.identity, self.peer, encrypted)
     
     def receive_secure_message(self, encrypted: bytes) -> bytes:
-        """Decrypt a received message using the established session key."""
+        """Decrypt a received authenticated and encrypted message using the established session key."""
         box = SecretBox(self.session_key)
         try:
             return box.decrypt(encrypted)
@@ -271,7 +272,6 @@ class InitiatorWaiting(BaseModel):
         responder_cert = Certificate(
             identity=payload.certificate.identity,
             verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            issuer=payload.certificate.issuer,
             signature=Base64Bytes.validate(payload.certificate.signature, None),
         )
         verified_cert = self.ca.verify_certificate(responder_cert)
@@ -312,7 +312,6 @@ class InitiatorWaiting(BaseModel):
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
                 verify_key=self.certificate.verify_key.to_base64(),
-                issuer=self.certificate.issuer,
                 signature=Base64Bytes(self.certificate.signature).to_base64(),
             ),
             signature=Base64Bytes(sig).to_base64(),
@@ -322,6 +321,7 @@ class InitiatorWaiting(BaseModel):
         # Encrypt and send message 3
         plaintext = payload.model_dump_json().encode()
         encrypted = box.encrypt(plaintext)
+        # TODO box automatically generates a nonce
         msg3 = SigmaMessage3(encrypted_payload=encrypted)
         self.network.send_message(self.identity, self.peer, msg3)
         
@@ -333,7 +333,7 @@ class InitiatorWaiting(BaseModel):
             network=self.network,
         )
         
-        return msg3, ready_user
+        return msg3, ready_user  # TODO CS: decide on one or the other paradigm
 
 
 # ------------------------------------------------------------------------------
@@ -385,7 +385,6 @@ class ResponderWaiting(BaseModel):
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
                 verify_key=self.certificate.verify_key.to_base64(),
-                issuer=self.certificate.issuer,
                 signature=Base64Bytes(self.certificate.signature).to_base64(),
             ),
             signature=Base64Bytes(sig).to_base64(),
@@ -434,21 +433,17 @@ class ResponderWaitingForMsg3(BaseModel):
     
     def receive_message3(self, msg3: SigmaMessage3) -> ReadyUser:
         """Process message 3, completing the handshake."""
-        # Decrypt message 3
         box = SecretBox(self.derived_key)
         try:
             plaintext = box.decrypt(msg3.encrypted_payload)
         except CryptoError as e:
             raise ValueError("Decryption of message 3 failed") from e
         
-        # Parse and validate initiator's payload
         payload = SigmaInitiatorPayload.model_validate_json(plaintext)
-
         # TODO CS: transforming this here is really annoying
         initiator_cert = Certificate(
             identity=payload.certificate.identity,
             verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            issuer=payload.certificate.issuer,
             signature=Base64Bytes.validate(payload.certificate.signature, None),
         )
         verified_cert = self.ca.verify_certificate(initiator_cert)
@@ -466,9 +461,7 @@ class ResponderWaitingForMsg3(BaseModel):
         if not hmac.compare_digest(expected_mac, Base64Bytes.validate(payload.mac, None)):
             raise ValueError("Initiator MAC verification failed")
         
-        # Handshake is complete, transition to ready state
         print(f"Handshake complete between {self.peer} and {self.identity}. Session key established.")
-        
         return ReadyUser(
             identity=self.identity,
             peer=self.peer,

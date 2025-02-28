@@ -5,10 +5,10 @@ from pydantic import BaseModel
 
 
 class Certificate(BaseModel):
+    # We do not keep issuer info as we only have one CA
     identity: str
-    verify_key: VerifyKey  # kept as a key object
-    issuer: str
-    signature: bytes
+    verify_key: VerifyKey
+    signature: bytes  # TODO CS: Keep this as SIgnature
 
     class Config:
         arbitrary_types_allowed = True
@@ -19,10 +19,9 @@ class VerifiedCertificate(Certificate):
 
 
 class CertificateAuthority:
-    def __init__(self, signing_key: SigningKey, issuer: str = "CA"):
-        self.signing_key = signing_key
-        self.verify_key = signing_key.verify_key
-        self.issuer = issuer
+    def __init__(self):
+        self.signing_key = SigningKey.generate()
+        self.verify_key = self.signing_key.verify_key
 
     def generate_challenge(self) -> bytes:
         return secrets.token_bytes(32)
@@ -40,7 +39,6 @@ class CertificateAuthority:
         return Certificate(
             identity=identity,
             verify_key=verify_key,
-            issuer=self.issuer,
             signature=signature,
         )
 

@@ -7,19 +7,14 @@ from nacl.signing import SigningKey
 from user import (
     User, 
     PydanticSigningKey, 
-    PydanticVerifyKey,
     SigmaMessage1,
     SigmaMessage2,
     SigmaMessage3
 )
 
 # Import the necessary CA classes
-from sigma.ca import Certificate, CertificateAuthority
+from sigma.ca import CertificateAuthority
 
-
-# ------------------------------------------------------------------------------
-# Simple Network Simulation
-# ------------------------------------------------------------------------------
 
 class SimpleNetwork:
     """A simple network simulator for the SIGMA protocol."""
@@ -61,49 +56,39 @@ class SimpleNetwork:
 # Demo Functions
 # ------------------------------------------------------------------------------
 
-async def setup_users():
+def setup_users():
     """Set up a certificate authority and two users."""
-    # Create a Certificate Authority
-    ca_signing_key = SigningKey.generate()
-    ca = CertificateAuthority(
-        signing_key=ca_signing_key
-    )
-    
-    # Create a network
+    ca = CertificateAuthority()
     network = SimpleNetwork()
     
     # Create Alice
     alice_signing_key = PydanticSigningKey.generate()
-    alice_verify_key = PydanticVerifyKey(alice_signing_key.verify_key.encode())
     alice = User(
         identity="alice",
         ca=ca,
         signing_key=alice_signing_key,
-        verify_key=alice_verify_key,
         network=network
     )
-    network.register_user("alice")
     
     # Create Bob
     bob_signing_key = PydanticSigningKey.generate()
-    bob_verify_key = PydanticVerifyKey(bob_signing_key.verify_key.encode())
     bob = User(
         identity="bob",
         ca=ca,
         signing_key=bob_signing_key,
-        verify_key=bob_verify_key,
         network=network
     )
+
+    network.register_user("alice")
     network.register_user("bob")
     
     return alice, bob, network
 
 
-async def run_handshake(alice_user: User, bob_user: User, network: SimpleNetwork):
+def run_handshake(alice_user: User, bob_user: User, network: SimpleNetwork):
     """Run the SIGMA handshake between Alice and Bob."""
     print("\n=== Obtaining Certificates ===")
     
-    # Both users obtain certificates
     alice_verified = alice_user.obtain_certificate()
     print("Alice obtained certificate")
     
@@ -113,7 +98,7 @@ async def run_handshake(alice_user: User, bob_user: User, network: SimpleNetwork
     print("\n=== Starting Handshake: Alice initiates, Bob responds ===")
     
     # Alice initiates
-    alice_initiator = alice_verified.initiate_handshake("bob")
+    alice_initiator = alice_verified.initiate_handshake("bob") # TODO CS this should be one class
     msg1, alice_waiting = alice_initiator.send_message1()
     print("Alice sent Message 1 to Bob")
     
@@ -161,15 +146,15 @@ async def run_handshake(alice_user: User, bob_user: User, network: SimpleNetwork
     return alice_ready, bob_ready
 
 
-async def main():
+def main():
     """Main function demonstrating the use of the SIGMA protocol."""
     print("=== SIGMA Protocol Demo ===")
     
     # Setup users
-    alice, bob, network = await setup_users()
+    alice, bob, network = setup_users()
     
     # Run the handshake
-    alice_ready, bob_ready = await run_handshake(alice, bob, network)
+    alice_ready, bob_ready = run_handshake(alice, bob, network)
     
     print("\n=== Session Information ===")
     print(f"Alice's peer: {alice_ready.peer}")
@@ -180,4 +165,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+   main()
