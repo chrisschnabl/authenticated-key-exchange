@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 # Assuming these are imported from other modules
 from sigma.ca import Certificate, CertificateAuthority
-from crypto_utils import sign_transcript, verify_signature
+from crypto_utils import derive_key, sign_transcript, verify_signature
 from msgs import (
     CertificatePayload,
     SigmaInitiatorPayload,
@@ -253,10 +253,8 @@ class InitiatorWaiting(BaseModel):
         """Process message 2 and send message 3, completing the handshake."""
         # Extract responder's ephemeral public key
         resp_ephem: PydanticPublicKey = msg2.ephemeral_pub
-        
-        # Compute shared secret and derive key
-        shared_secret = crypto_scalarmult(bytes(self.ephemeral_private), bytes(resp_ephem))
-        derived_key = hashlib.sha256(shared_secret).digest()
+    
+        derived_key = derive_key(resp_ephem.encode(), self.ephemeral_private.encode())
         
         # Decrypt the payload
         box = SecretBox(derived_key)
@@ -364,8 +362,7 @@ class ResponderWaiting(BaseModel):
         nonce = secrets.token_bytes(16)
         
         # Compute shared secret and derive key
-        shared_secret = crypto_scalarmult(bytes(ephemeral_private), bytes(received_ephem))
-        derived_key = hashlib.sha256(shared_secret).digest()
+        derived_key = derive_key(received_ephem.encode(), ephemeral_private.encode())
         
         # Create transcript
         transcript = (
@@ -379,6 +376,7 @@ class ResponderWaiting(BaseModel):
         # Sign transcript and compute MAC
         sig = sign_transcript(self.signing_key, transcript)
         mac_val = hmac.new(derived_key, transcript, hashlib.sha256).digest()
+        # TODO CS: use pynacl for hmac
         
         # Create payload
         payload = SigmaResponderPayload(
@@ -463,6 +461,7 @@ class ResponderWaitingForMsg3(BaseModel):
             raise ValueError("Initiator signature verification failed")
         
         # Verify MAC
+        # TODO CS: use pynacl for hamc
         expected_mac = hmac.new(self.derived_key, self.transcript, hashlib.sha256).digest()
         if not hmac.compare_digest(expected_mac, Base64Bytes.validate(payload.mac, None)):
             raise ValueError("Initiator MAC verification failed")
