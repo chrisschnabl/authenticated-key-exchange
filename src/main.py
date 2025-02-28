@@ -3,10 +3,7 @@ from nacl.signing import SigningKey
 # Import the simplified SIGMA implementation
 from network.simulated_network import SimulatedNetwork
 from user import (
-    User, 
-    SigmaMessage1,
-    SigmaMessage2,
-    SigmaMessage3
+    User
 )
 
 # Import the necessary CA classes

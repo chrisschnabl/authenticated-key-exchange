@@ -12,8 +12,8 @@ from nacl.signing import SigningKey, VerifyKey
 from pydantic import BaseModel, ConfigDict
 # Assuming these are imported from other modules
 from sigma.ca import Certificate, CertificateAuthority
-from crypto_utils import derive_key, sign_transcript, verify_signature, hmac
-from msgs import (
+from crypto_utils import SymmetricKey, derive_key, sign_transcript, verify_signature, hmac
+from messages import (
     SigmaInitiatorPayload,
     SigmaMessage1,
     SigmaMessage2,
@@ -53,9 +53,9 @@ class VerifiedUser(BaseModel):
     ca: CertificateAuthority
     certificate: Certificate
     signing_key: SigningKey
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     def initiate_handshake(self) -> Tuple[SigmaMessage1, InitiatorWaiting]:
         ephemeral_private = PrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
@@ -117,11 +117,12 @@ class VerifiedUser(BaseModel):
         )
 
 
-DerviedKey: TypeAlias = bytes
+class Session(BaseModel):
+    ...
 
 class ReadyUser(BaseModel):
     """User session with an established secure session."""
-    session_key: DerviedKey
+    session_key: SymmetricKey
 
     #def send_secure_message(self, message: bytes) -> None:
     #    """Send an authenticated and encrypted message using the established session key."""
@@ -142,8 +143,8 @@ class ReadyUser(BaseModel):
 
 class InitiatorWaiting(BaseModel):
     """Initiator waiting for message 2 from responder."""
-    certificate: Certificate
     ca: CertificateAuthority
+    certificate: Certificate
     signing_key: SigningKey
     ephemeral_private: PrivateKey
     ephemeral_public: PublicKey
@@ -184,7 +185,6 @@ class InitiatorWaiting(BaseModel):
         if  hmac(transcript, derived_key) != payload.mac:
             raise ValueError("Responder MAC verification failed")
         
-        # Prepare and sign message 3
         transcript2 = (
             response_ephem +
             self.ephemeral_public.encode() +

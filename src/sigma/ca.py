@@ -1,12 +1,10 @@
-import pickle
 import secrets
 from typing import TypeAlias
 
 from nacl.signing import SigningKey, VerifyKey
-from nacl.secret import SecretBox
 from pydantic import BaseModel
-from crypto_utils import Signature
 
+from crypto_utils import Signature
 
 class Certificate(BaseModel):
     # We do not keep issuer info as we only have one CA

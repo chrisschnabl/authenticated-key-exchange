@@ -1,15 +1,10 @@
 from __future__ import annotations
-from typing import TypeAlias
+from pydantic import BaseModel, ConfigDict
 
-from pydantic import BaseModel
-
-from crypto_utils import Signature
 from sigma.ca import Certificate
 from nacl.public import PublicKey
 
-Nonce: TypeAlias = bytes
-MAC: TypeAlias = bytes
-
+from crypto_utils import Nonce, MAC, Signature
 
 class SigmaResponderPayload(BaseModel):
     nonce: Nonce
@@ -17,31 +12,23 @@ class SigmaResponderPayload(BaseModel):
     signature: Signature
     mac: MAC
 
-
 class SigmaInitiatorPayload(BaseModel):
     certificate: Certificate
     signature: Signature
     mac: MAC
 
-
 class SigmaMessage1(BaseModel):
     ephemeral_pub: PublicKey  # clear
     nonce: Nonce
 
-    class Config:
-        arbitrary_types_allowed = True
-
+    model_config = ConfigDict(arbitrary_types_allowed=True)     
 
 class SigmaMessage2(BaseModel):
     ephemeral_pub: PublicKey  # responder's ephemeral public key (clear)
     encrypted_payload: bytes  # encrypted with SecretBox using derived Ke
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)     
 
 
 class SigmaMessage3(BaseModel):
-    encrypted_payload: bytes  # encrypted with SecretBox using derived Ke
-
-    class Config:
-        arbitrary_types_allowed = True
+    encrypted_payload: bytes
