@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
-import os
 import secrets
 from typing import Any, Tuple
 
@@ -12,11 +9,9 @@ from nacl.public import PrivateKey, PublicKey
 from nacl.secret import SecretBox
 from nacl.signing import SigningKey, VerifyKey
 from pydantic import BaseModel, ConfigDict
-from nacl.hash import blake2b
-from nacl.encoding import HexEncoder
 # Assuming these are imported from other modules
 from sigma.ca import Certificate, CertificateAuthority
-from crypto_utils import derive_key, sign_transcript, verify_signature
+from crypto_utils import derive_key, sign_transcript, verify_signature, hmac
 from msgs import (
     CertificatePayload,
     SigmaInitiatorPayload,
@@ -293,8 +288,8 @@ class InitiatorWaiting(BaseModel):
             raise ValueError("Responder signature verification failed")
         
         # Verify MAC
-        expected_mac = blake2b(transcript, key=derived_key, encoder=HexEncoder)
-        if not hmac.compare_digest(expected_mac, Base64Bytes.validate(payload.mac, None)):
+        expected_mac = hmac(transcript, derived_key)
+        if expected_mac != Base64Bytes.validate(payload.mac, None):
             raise ValueError("Responder MAC verification failed")
         
         # Prepare and sign message 3
@@ -305,7 +300,7 @@ class InitiatorWaiting(BaseModel):
             self.nonce
         )
         sig = sign_transcript(self.signing_key, transcript2)
-        mac_val = blake2b(transcript2, key=derived_key, encoder=HexEncoder)
+        mac_val = hmac(transcript2, derived_key)
         
         # Create payload
         payload = SigmaInitiatorPayload(
@@ -374,7 +369,7 @@ class ResponderWaiting(BaseModel):
         
         # Sign transcript and compute MAC
         sig = sign_transcript(self.signing_key, transcript)
-        mac_val = blake2b(transcript, key=derived_key, encoder=HexEncoder)
+        mac_val = hmac(transcript, derived_key)
 
         # TODO CS: use pynacl for hmac
         
@@ -457,8 +452,8 @@ class ResponderWaitingForMsg3(BaseModel):
         
         # Verify MAC
         # TODO CS: use pynacl for hamc
-        expected_mac = blake2b(self.transcript, key=self.derived_key, encoder=HexEncoder)
-        if not hmac.compare_digest(expected_mac, Base64Bytes.validate(payload.mac, None)):
+        expected_mac = hmac(self.transcript, self.derived_key)
+        if expected_mac != Base64Bytes.validate(payload.mac, None):
             raise ValueError("Initiator MAC verification failed")
         
         print(f"Handshake complete between {self.peer} and {self.identity}. Session key established.")

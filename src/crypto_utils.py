@@ -1,6 +1,8 @@
 from nacl.signing import SigningKey, VerifyKey
 from nacl.bindings import crypto_scalarmult
-import hashlib
+
+from nacl.hash import blake2b, sha256
+from nacl.encoding import HexEncoder
 
 # TODO CS: use better typing here
 def sign_transcript(signing_key: SigningKey, transcript: bytes) -> bytes:
@@ -24,5 +26,8 @@ def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: bytes)
 
 def derive_key(ephemeral_public: bytes, ephemeral_private: bytes) -> bytes:  # TODO CS: use typing here
     shared_secret = crypto_scalarmult(bytes(ephemeral_private), bytes(ephemeral_public))
-    return hashlib.sha256(shared_secret).digest()
-    # TODO CS use pynacl hashing
+    return sha256(shared_secret)[:32]
+
+def hmac(payload: bytes, key: bytes) -> bytes:
+     return blake2b(payload, key=key, encoder=HexEncoder)
+
