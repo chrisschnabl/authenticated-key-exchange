@@ -155,7 +155,7 @@ class InitiatorWaiting(BaseModel):
     def receive_message2(self, msg2: SigmaMessage2) -> Tuple[SigmaMessage3, ReadyUser]:
         """Process message 2 and send message 3, completing the handshake."""
 
-        response_ephem: PublicKey = msg2.ephemeral_pub.encode()
+        response_ephem: bytes = msg2.ephemeral_pub.encode()
         derived_key = derive_key(msg2.ephemeral_pub, self.ephemeral_private)
         
         box = SecretBox(derived_key)
