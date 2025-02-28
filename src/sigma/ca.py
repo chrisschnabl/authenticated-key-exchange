@@ -3,12 +3,14 @@ import secrets
 from nacl.signing import SigningKey, VerifyKey
 from pydantic import BaseModel
 
+from crypto_utils import Signature
+
 
 class Certificate(BaseModel):
     # We do not keep issuer info as we only have one CA
     identity: str
     verify_key: VerifyKey
-    signature: bytes  # TODO CS: Keep this as SIgnature
+    signature: Signature  # TODO CS: Keep this as SIgnature, todo veriyfy the length, needs to be 64 bytes
 
     class Config:
         arbitrary_types_allowed = True
@@ -35,7 +37,7 @@ class CertificateAuthority:
 
     def issue_certificate(self, identity: str, verify_key: VerifyKey) -> Certificate:
         data = identity.encode() + verify_key.encode()
-        signature = self.signing_key.sign(data).signature
+        signature: Signature = self.signing_key.sign(data).signature
         return Certificate(
             identity=identity,
             verify_key=verify_key,

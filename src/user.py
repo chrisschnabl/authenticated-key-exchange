@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import pickle
 import secrets
 from typing import Any, Tuple
 
@@ -20,6 +21,7 @@ from msgs import (
     SigmaMessage3,
     SigmaResponderPayload,
 )
+from crypto_utils import Signature
 
 
 # ------------------------------------------------------------------------------
@@ -260,14 +262,14 @@ class InitiatorWaiting(BaseModel):
             raise ValueError("Decryption failed") from e
         
         # Parse and validate responder's payload
-        payload = SigmaResponderPayload.model_validate_json(decrypted)
+        payload = pickle.loads(decrypted)
         
         # Verify responder's 
         # TODO CS: transforming this here is really annoying
         responder_cert = Certificate(
             identity=payload.certificate.identity,
             verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            signature=Base64Bytes.validate(payload.certificate.signature, None),
+            signature=payload.certificate.signature,
         )
         verified_cert = self.ca.verify_certificate(responder_cert)
         
@@ -283,13 +285,12 @@ class InitiatorWaiting(BaseModel):
         if not verify_signature(
             verified_cert.verify_key,
             transcript,
-            Base64Bytes.validate(payload.signature, None)
+            payload.signature
         ):
             raise ValueError("Responder signature verification failed")
         
-        # Verify MAC
-        expected_mac = hmac(transcript, derived_key)
-        if expected_mac != Base64Bytes.validate(payload.mac, None):
+
+        if  hmac(transcript, derived_key) != Base64Bytes.validate(payload.mac, None):
             raise ValueError("Responder MAC verification failed")
         
         # Prepare and sign message 3
@@ -299,22 +300,21 @@ class InitiatorWaiting(BaseModel):
             responder_nonce +
             self.nonce
         )
-        sig = sign_transcript(self.signing_key, transcript2)
-        mac_val = hmac(transcript2, derived_key)
+        sig: Signature = sign_transcript(self.signing_key, transcript2)
         
         # Create payload
         payload = SigmaInitiatorPayload(
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
                 verify_key=self.certificate.verify_key.to_base64(),
-                signature=Base64Bytes(self.certificate.signature).to_base64(),
+                signature=self.certificate.signature,
             ),
-            signature=Base64Bytes(sig).to_base64(),
-            mac=Base64Bytes(mac_val).to_base64(),
+            signature=sig,
+            mac=Base64Bytes(hmac(transcript2, derived_key)).to_base64(), # TODO CS: type this
         )
         
         # Encrypt and send message 3
-        plaintext = payload.model_dump_json().encode()
+        plaintext = pickle.dumps(payload)
         encrypted = box.encrypt(plaintext)
         # TODO box automatically generates a nonce
         msg3 = SigmaMessage3(encrypted_payload=encrypted)
@@ -380,15 +380,15 @@ class ResponderWaiting(BaseModel):
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
                 verify_key=self.certificate.verify_key.to_base64(),
-                signature=Base64Bytes(self.certificate.signature).to_base64(),
+                signature=self.certificate.signature,
             ),
-            signature=Base64Bytes(sig).to_base64(),
+            signature=sig,
             mac=Base64Bytes(mac_val).to_base64(),
         )
         
         # Encrypt and send message 2
         # TODO CS: this is also annoying
-        plaintext = payload.model_dump_json().encode()
+        plaintext = pickle.dumps(payload)
         box = SecretBox(derived_key)
         encrypted = box.encrypt(plaintext)
         msg2 = SigmaMessage2(
@@ -434,19 +434,19 @@ class ResponderWaitingForMsg3(BaseModel):
         except CryptoError as e:
             raise ValueError("Decryption of message 3 failed") from e
         
-        payload = SigmaInitiatorPayload.model_validate_json(plaintext)
+        payload = pickle.loads(plaintext)
         # TODO CS: transforming this here is really annoying
         initiator_cert = Certificate(
             identity=payload.certificate.identity,
             verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            signature=Base64Bytes.validate(payload.certificate.signature, None),
+            signature=payload.certificate.signature,
         )
         verified_cert = self.ca.verify_certificate(initiator_cert)
 
         if not verify_signature(
             verified_cert.verify_key,
             self.transcript,
-            Base64Bytes.validate(payload.signature, None)
+            payload.signature
         ):
             raise ValueError("Initiator signature verification failed")
         

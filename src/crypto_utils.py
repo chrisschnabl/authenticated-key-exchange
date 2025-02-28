@@ -1,16 +1,19 @@
+from typing import TypeAlias
 from nacl.signing import SigningKey, VerifyKey
 from nacl.bindings import crypto_scalarmult
 
 from nacl.hash import blake2b, sha256
-from nacl.encoding import HexEncoder
 
 # TODO CS: use better typing here
-def sign_transcript(signing_key: SigningKey, transcript: bytes) -> bytes:
+Signature: TypeAlias = bytes
+
+def sign_transcript(signing_key: SigningKey, transcript: bytes) -> Signature:
     """
     Signs the given transcript using the provided signing key.
     Returns the signature bytes.
     """
     return signing_key.sign(transcript).signature
+# TODO CS: type this in a way where we it is marhsalled
 
 
 def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: bytes) -> bool:
@@ -29,5 +32,5 @@ def derive_key(ephemeral_public: bytes, ephemeral_private: bytes) -> bytes:  # T
     return sha256(shared_secret)[:32]
 
 def hmac(payload: bytes, key: bytes) -> bytes:
-     return blake2b(payload, key=key, encoder=HexEncoder)
+     return blake2b(payload, key=key, digest_size=32)
 
