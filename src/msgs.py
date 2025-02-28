@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from crypto_utils import Signature
 from sigma.ca import Certificate
-
+from nacl.public import PublicKey
 
 Nonce: TypeAlias = bytes
 MAC: TypeAlias = bytes
@@ -24,13 +24,9 @@ class SigmaInitiatorPayload(BaseModel):
     mac: MAC
 
 
-# Message models
-from nacl.public import PublicKey
-
-
 class SigmaMessage1(BaseModel):
     ephemeral_pub: PublicKey  # clear
-    nonce: bytes
+    nonce: Nonce
 
     class Config:
         arbitrary_types_allowed = True

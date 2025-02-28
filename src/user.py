@@ -39,7 +39,6 @@ class User(BaseModel):
         cert = self.ca.issue_certificate(self.identity, sig, self.signing_key.verify_key)
         
         return VerifiedUser(
-            identity=self.identity,
             ca=self.ca,
             certificate=cert,
             signing_key=self.signing_key,
@@ -51,14 +50,13 @@ class User(BaseModel):
 # ------------------------------------------------------------------------------
 
 class VerifiedUser(BaseModel):
-    identity: str
     ca: CertificateAuthority
     certificate: Certificate
     signing_key: SigningKey
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    def initiate_handshake(self, peer: str) -> Tuple[SigmaMessage1, InitiatorWaiting]:
+    def initiate_handshake(self) -> Tuple[SigmaMessage1, InitiatorWaiting]:
         ephemeral_private = PrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
@@ -66,7 +64,6 @@ class VerifiedUser(BaseModel):
         msg1 = SigmaMessage1(ephemeral_pub=ephemeral_public, nonce=nonce)
         
         return msg1, InitiatorWaiting(
-            identity=self.identity,
             certificate=self.certificate,
             ca=self.ca,
             signing_key=self.signing_key,
@@ -76,7 +73,7 @@ class VerifiedUser(BaseModel):
         )
     
     # TODO CS: think about a multi-session paradigm here
-    def receive_message1(self, msg1: SigmaMessage1, sender: str) -> Tuple[SigmaMessage2, ResponderWaitingForMsg3]:
+    def receive_message1(self, msg1: SigmaMessage1) -> Tuple[SigmaMessage2, ResponderWaitingForMsg3]:
         received_ephem: PublicKey = msg1.ephemeral_pub
         received_nonce = msg1.nonce
         
@@ -114,9 +111,7 @@ class VerifiedUser(BaseModel):
         )
 
         return msg2, ResponderWaitingForMsg3(
-            identity=self.identity,
             ca=self.ca,
-            peer=sender,
             transcript=transcript_msg2,
             derived_key=derived_key,
         )
@@ -159,8 +154,8 @@ class InitiatorWaiting(BaseModel):
     def receive_message2(self, msg2: SigmaMessage2) -> Tuple[SigmaMessage3, ReadyUser]:
         """Process message 2 and send message 3, completing the handshake."""
 
-        resp_ephem: PublicKey = msg2.ephemeral_pub
-        derived_key = derive_key(resp_ephem, self.ephemeral_private)
+        response_ephem: PublicKey = msg2.ephemeral_pub.encode()
+        derived_key = derive_key(msg2.ephemeral_pub, self.ephemeral_private)
         
         box = SecretBox(derived_key)
         try:
@@ -173,7 +168,7 @@ class InitiatorWaiting(BaseModel):
         
         transcript = (
             self.ephemeral_public.encode() +
-            resp_ephem.encode() +
+            response_ephem +
             self.nonce +
             payload.nonce
         )
@@ -191,7 +186,7 @@ class InitiatorWaiting(BaseModel):
         
         # Prepare and sign message 3
         transcript2 = (
-            resp_ephem.encode() +
+            response_ephem +
             self.ephemeral_public.encode() +
             payload.nonce +
             self.nonce
@@ -215,15 +210,9 @@ class InitiatorWaiting(BaseModel):
         return msg3, ready_user  # TODO CS: decide on one or the other paradigm
 
 
-# ------------------------------------------------------------------------------
-# Responder States
-# ------------------------------------------------------------------------------
-
 class ResponderWaitingForMsg3(BaseModel):
     """Responder waiting for message 3 from initiator."""
-    identity: str
     ca: CertificateAuthority
-    peer: str
     transcript: bytes
     derived_key: bytes
     
@@ -251,7 +240,6 @@ class ResponderWaitingForMsg3(BaseModel):
         if expected_mac != payload.mac:
             raise ValueError("Initiator MAC verification failed")
         
-        print(f"Handshake complete between {self.peer} and {self.identity}. Session key established.")
         return ReadyUser(
             session_key=self.derived_key,
         )

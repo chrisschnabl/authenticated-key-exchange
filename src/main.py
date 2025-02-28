@@ -59,12 +59,12 @@ def run_handshake(alice_user: User, bob_user: User, network: SimulatedNetwork):
     print("\n=== Starting Handshake: Alice initiates, Bob responds ===")
     
     # Alice initiates
-    msg1, alice_initiator = alice_verified.initiate_handshake("bob") # TODO CS this should be one class
+    msg1, alice_initiator = alice_verified.initiate_handshake() # TODO CS this should be one class
 
     print("Alice sent Message 1 to Bob")
     
     # Process message 1
-    msg2, bob_waiting = bob_verified.receive_message1(msg1, alice_verified.identity)
+    msg2, bob_waiting = bob_verified.receive_message1(msg1)
     print("Bob received Message 1, sent Message 2 to Alice")
     
     # Process message 2
