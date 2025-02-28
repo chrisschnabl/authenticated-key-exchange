@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 from typing import Any, Optional, Self, Tuple
 
 from nacl.bindings import crypto_scalarmult
@@ -30,6 +31,7 @@ from msgs import (
 # Base64 Helper Mixin
 # ------------------------------------------------------------------------------
 
+# TODO: fix this mixin 
 class Base64SerializerMixin:
     """
     Mixin to automatically decode a base64‑encoded value into raw bytes on
@@ -46,7 +48,7 @@ class Base64SerializerMixin:
         return base64.b64decode(data)
 
     @classmethod
-    def validate(cls, value: Any, info: Any) -> Any:
+    def validate(cls, value: Any, info: Any) -> Any: # TODO: remove this
         # If already an instance of this class, return it.
         if isinstance(value, cls):
             return value
@@ -107,7 +109,6 @@ class User(BaseModel):
     identity: str
     ca: CertificateAuthority
     signing_key: PydanticSigningKey
-    verify_key: PydanticVerifyKey
     network: Any
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -115,15 +116,15 @@ class User(BaseModel):
     def obtain_certificate(self) -> VerifiedUser:
         challenge = self.ca.generate_challenge()
         sig = self.signing_key.sign(challenge).signature
-        self.ca.verify_challenge(challenge, sig, self.verify_key)
-        cert = self.ca.issue_certificate(self.identity, self.verify_key)
+        verify_key = PydanticVerifyKey(self.signing_key.verify_key.encode()) # TODO CS: fix this
+        self.ca.verify_challenge(challenge, sig, verify_key)
+        cert = self.ca.issue_certificate(self.identity, verify_key)
         
         return VerifiedUser(
             identity=self.identity,
             ca=self.ca,
-            signing_key=self.signing_key,
-            verify_key=self.verify_key,
             certificate=cert,
+            signing_key=self.signing_key,
             network=self.network,
         )
 
@@ -135,8 +136,8 @@ class User(BaseModel):
 class VerifiedUser(BaseModel):
     identity: str
     ca: CertificateAuthority
-    signing_key: PydanticSigningKey
     certificate: Certificate
+    signing_key: PydanticSigningKey
     network: Any
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -145,7 +146,7 @@ class VerifiedUser(BaseModel):
         """Begin a handshake as the initiator."""
         ephemeral_private = PydanticPrivateKey.generate()
         ephemeral_public = PydanticPublicKey(ephemeral_private.public_key.encode())
-        nonce = os.urandom(16)
+        nonce = secrets.token_bytes(16)
         
         return InitiatorStart(
             identity=self.identity,
@@ -265,15 +266,15 @@ class InitiatorWaiting(BaseModel):
             raise ValueError("Decryption failed") from e
         
         # Parse and validate responder's payload
-        payload = SigmaResponderPayload.parse_raw(decrypted)
-        cert_dict = payload.certificate.dict()
+        payload = SigmaResponderPayload.model_validate_json(decrypted)
         
-        # Create and verify responder's certificate
+        # Verify responder's 
+        # TODO CS: transforming this here is really annoying
         responder_cert = Certificate(
-            identity=payload.responder_identity,
-            public_signing_key=PydanticVerifyKey(Base64Bytes.validate(cert_dict["public_signing_key"], None)),
-            issuer=cert_dict["issuer"],
-            signature=Base64Bytes.validate(cert_dict["signature"], None),
+            identity=payload.certificate.identity,
+            verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
+            issuer=payload.certificate.issuer,
+            signature=Base64Bytes.validate(payload.certificate.signature, None),
         )
         verified_cert = self.ca.verify_certificate(responder_cert)
         
@@ -287,7 +288,7 @@ class InitiatorWaiting(BaseModel):
         )
         
         if not verify_signature(
-            verified_cert.public_signing_key,
+            verified_cert.verify_key,
             transcript,
             Base64Bytes.validate(payload.signature, None)
         ):
@@ -310,10 +311,9 @@ class InitiatorWaiting(BaseModel):
         
         # Create payload
         payload = SigmaInitiatorPayload(
-            initiator_identity=self.identity,
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
-                public_signing_key=self.certificate.public_signing_key.to_base64(),
+                verify_key=self.certificate.verify_key.to_base64(),
                 issuer=self.certificate.issuer,
                 signature=Base64Bytes(self.certificate.signature).to_base64(),
             ),
@@ -322,7 +322,7 @@ class InitiatorWaiting(BaseModel):
         )
         
         # Encrypt and send message 3
-        plaintext = payload.json().encode()
+        plaintext = payload.model_dump_json().encode()
         encrypted = box.encrypt(plaintext)
         msg3 = SigmaMessage3(encrypted_payload=encrypted)
         self.network.send_message(self.identity, self.peer, msg3)
@@ -359,10 +359,9 @@ class ResponderWaiting(BaseModel):
         received_ephem: PydanticPublicKey = msg1.ephemeral_pub
         received_nonce = msg1.nonce
         
-        # Generate own ephemeral key pair and nonce
         ephemeral_private = PydanticPrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
-        nonce = os.urandom(16)
+        nonce = secrets.token_bytes(16)
         
         # Compute shared secret and derive key
         shared_secret = crypto_scalarmult(bytes(ephemeral_private), bytes(received_ephem))
@@ -375,6 +374,7 @@ class ResponderWaiting(BaseModel):
             received_nonce +
             nonce
         )
+        
 
         # Sign transcript and compute MAC
         sig = sign_transcript(self.signing_key, transcript)
@@ -383,10 +383,10 @@ class ResponderWaiting(BaseModel):
         # Create payload
         payload = SigmaResponderPayload(
             nonce=Base64Bytes(nonce).to_base64(),
-            responder_identity=self.identity,
+            # Again TODO CS: transforming this here is really annoying
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
-                public_signing_key=self.certificate.public_signing_key.to_base64(),
+                verify_key=self.certificate.verify_key.to_base64(),
                 issuer=self.certificate.issuer,
                 signature=Base64Bytes(self.certificate.signature).to_base64(),
             ),
@@ -395,7 +395,8 @@ class ResponderWaiting(BaseModel):
         )
         
         # Encrypt and send message 2
-        plaintext = payload.json().encode()
+        # TODO CS: this is also annoying
+        plaintext = payload.model_dump_json().encode()
         box = SecretBox(derived_key)
         encrypted = box.encrypt(plaintext)
         msg2 = SigmaMessage2(
@@ -403,17 +404,21 @@ class ResponderWaiting(BaseModel):
             encrypted_payload=encrypted,
         )
         self.network.send_message(self.identity, self.peer, msg2)
-        
-        # Transition to waiting for message 3
+
+
+        # This swaps around the order
+        responder_transcript = (
+            ephemeral_public.encode() +
+            received_ephem.encode() +
+            nonce +  
+            received_nonce
+        )
         return msg2, ResponderWaitingForMsg3(
             identity=self.identity,
             ca=self.ca,
             network=self.network,
             peer=self.peer,
-            received_ephemeral_pub=received_ephem,
-            received_nonce=received_nonce,
-            ephemeral_public=PydanticPublicKey(ephemeral_public.encode()),
-            nonce=nonce,
+            transcript=responder_transcript,
             derived_key=derived_key,
         )
 
@@ -424,10 +429,7 @@ class ResponderWaitingForMsg3(BaseModel):
     ca: CertificateAuthority
     network: Any # TODO: maybe remove this
     peer: str
-    received_ephemeral_pub: PydanticPublicKey
-    received_nonce: bytes
-    ephemeral_public: PydanticPublicKey
-    nonce: bytes
+    transcript: bytes
     derived_key: bytes
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -442,35 +444,26 @@ class ResponderWaitingForMsg3(BaseModel):
             raise ValueError("Decryption of message 3 failed") from e
         
         # Parse and validate initiator's payload
-        payload = SigmaInitiatorPayload.parse_raw(plaintext)
-        cert_dict = payload.certificate.dict()
-        
-        # Create and verify initiator's certificate
+        payload = SigmaInitiatorPayload.model_validate_json(plaintext)
+
+        # TODO CS: transforming this here is really annoying
         initiator_cert = Certificate(
-            identity=payload.initiator_identity,
-            public_signing_key=PydanticVerifyKey(Base64Bytes.validate(cert_dict["public_signing_key"], None)),
-            issuer=cert_dict["issuer"],
-            signature=Base64Bytes.validate(cert_dict["signature"], None),
+            identity=payload.certificate.identity,
+            verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
+            issuer=payload.certificate.issuer,
+            signature=Base64Bytes.validate(payload.certificate.signature, None),
         )
         verified_cert = self.ca.verify_certificate(initiator_cert)
-        
-        # Verify transcript signature
-        transcript = (
-            self.ephemeral_public.encode() +
-            self.received_ephemeral_pub.encode() +
-            self.nonce +
-            self.received_nonce
-        )
-        
+
         if not verify_signature(
-            verified_cert.public_signing_key,
-            transcript,
+            verified_cert.verify_key,
+            self.transcript,
             Base64Bytes.validate(payload.signature, None)
         ):
             raise ValueError("Initiator signature verification failed")
         
         # Verify MAC
-        expected_mac = hmac.new(self.derived_key, transcript, hashlib.sha256).digest()
+        expected_mac = hmac.new(self.derived_key, self.transcript, hashlib.sha256).digest()
         if not hmac.compare_digest(expected_mac, Base64Bytes.validate(payload.mac, None)):
             raise ValueError("Initiator MAC verification failed")
         

@@ -6,21 +6,19 @@ from pydantic import BaseModel
 # Payload models for encrypted data
 class CertificatePayload(BaseModel):
     identity: str
-    public_signing_key: str  # base64-encoded
+    verify_key: str  # base64-encoded
     issuer: str
     signature: str  # base64-encoded
 
 
 class SigmaResponderPayload(BaseModel):
     nonce: str  # base64-encoded responder nonce
-    responder_identity: str
     certificate: CertificatePayload
     signature: str  # base64-encoded signature over transcript
     mac: str  # base64-encoded MAC
 
 
 class SigmaInitiatorPayload(BaseModel):
-    initiator_identity: str
     certificate: CertificatePayload
     signature: str  # base64-encoded signature over transcript
     mac: str  # base64-encoded MAC
