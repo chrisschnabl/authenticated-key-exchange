@@ -51,7 +51,7 @@ class Base64SerializerMixin:
 # ------------------------------------------------------------------------------
 # Specialized Types for Keys and Generic Byte Fields
 # ------------------------------------------------------------------------------
-
+# TODO CS: fxi this
 class PydanticPrivateKey(PrivateKey, Base64SerializerMixin):
     """A PrivateKey with automatic base64 serialization for Pydantic."""
     pass
