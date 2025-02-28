@@ -26,7 +26,7 @@ class Base64SerializerMixin:
         yield cls.validate
 
     @classmethod
-    def validate(cls, value: str | bytes | object) -> Any:
+    def validate(cls, value: str | bytes | object, info: Any) -> Any:
         # If already an instance of this class, return it.
         if isinstance(value, cls):
             return value

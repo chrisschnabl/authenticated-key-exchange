@@ -261,17 +261,8 @@ class InitiatorWaiting(BaseModel):
         except CryptoError as e:
             raise ValueError("Decryption failed") from e
         
-        # Parse and validate responder's payload
         payload = pickle.loads(decrypted)
-        
-        # Verify responder's 
-        # TODO CS: transforming this here is really annoying
-        responder_cert = Certificate(
-            identity=payload.certificate.identity,
-            verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            signature=payload.certificate.signature,
-        )
-        verified_cert = self.ca.verify_certificate(responder_cert)
+        verified_cert = self.ca.verify_certificate(payload.certificate)
         
         # Verify transcript signature
         responder_nonce = Base64Bytes.validate(payload.nonce, None)
@@ -306,7 +297,7 @@ class InitiatorWaiting(BaseModel):
         payload = SigmaInitiatorPayload(
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
-                verify_key=self.certificate.verify_key.to_base64(),
+                verify_key=self.certificate.verify_key,
                 signature=self.certificate.signature,
             ),
             signature=sig,
@@ -379,7 +370,7 @@ class ResponderWaiting(BaseModel):
             # Again TODO CS: transforming this here is really annoying
             certificate=CertificatePayload(
                 identity=self.certificate.identity,
-                verify_key=self.certificate.verify_key.to_base64(),
+                verify_key=self.certificate.verify_key,
                 signature=self.certificate.signature,
             ),
             signature=sig,
@@ -435,13 +426,7 @@ class ResponderWaitingForMsg3(BaseModel):
             raise ValueError("Decryption of message 3 failed") from e
         
         payload = pickle.loads(plaintext)
-        # TODO CS: transforming this here is really annoying
-        initiator_cert = Certificate(
-            identity=payload.certificate.identity,
-            verify_key=PydanticVerifyKey(Base64Bytes.validate(payload.certificate.verify_key, None)),
-            signature=payload.certificate.signature,
-        )
-        verified_cert = self.ca.verify_certificate(initiator_cert)
+        verified_cert = self.ca.verify_certificate(payload.certificate)
 
         if not verify_signature(
             verified_cert.verify_key,

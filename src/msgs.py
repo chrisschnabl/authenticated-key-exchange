@@ -3,12 +3,13 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from crypto_utils import Signature
+from sigma.serialization import PydanticVerifyKey
 
 
 # Payload models for encrypted data
 class CertificatePayload(BaseModel):
     identity: str
-    verify_key: str  # base64-encoded
+    verify_key: PydanticVerifyKey  # base64-encoded
     signature: Signature  # base64-encoded
 
 
