@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict
 from sigma.ca import Certificate, CertificateAuthority
 from crypto_utils import derive_key, sign_transcript, verify_signature, hmac
 from msgs import (
-    CertificatePayload,
     SigmaInitiatorPayload,
     SigmaMessage1,
     SigmaMessage2,
@@ -261,16 +260,15 @@ class InitiatorWaiting(BaseModel):
         except CryptoError as e:
             raise ValueError("Decryption failed") from e
         
-        payload = pickle.loads(decrypted)
+        payload: SigmaInitiatorPayload = pickle.loads(decrypted)
         verified_cert = self.ca.verify_certificate(payload.certificate)
         
         # Verify transcript signature
-        responder_nonce = Base64Bytes.validate(payload.nonce, None)
         transcript = (
             self.ephemeral_public.encode() +
             resp_ephem.encode() +
             self.nonce +
-            responder_nonce
+            payload.nonce
         )
         
         if not verify_signature(
@@ -281,33 +279,27 @@ class InitiatorWaiting(BaseModel):
             raise ValueError("Responder signature verification failed")
         
 
-        if  hmac(transcript, derived_key) != Base64Bytes.validate(payload.mac, None):
+        if  hmac(transcript, derived_key) != payload.mac:
             raise ValueError("Responder MAC verification failed")
         
         # Prepare and sign message 3
         transcript2 = (
             resp_ephem.encode() +
             self.ephemeral_public.encode() +
-            responder_nonce +
+            payload.nonce +
             self.nonce
         )
         sig: Signature = sign_transcript(self.signing_key, transcript2)
         
-        # Create payload
         payload = SigmaInitiatorPayload(
-            certificate=CertificatePayload(
-                identity=self.certificate.identity,
-                verify_key=self.certificate.verify_key,
-                signature=self.certificate.signature,
-            ),
+            certificate=self.certificate,
             signature=sig,
-            mac=Base64Bytes(hmac(transcript2, derived_key)).to_base64(), # TODO CS: type this
+            mac=hmac(transcript2, derived_key), # TODO CS: type this
         )
         
         # Encrypt and send message 3
         plaintext = pickle.dumps(payload)
         encrypted = box.encrypt(plaintext)
-        # TODO box automatically generates a nonce
         msg3 = SigmaMessage3(encrypted_payload=encrypted)
         self.network.send_message(self.identity, self.peer, msg3)
         
@@ -366,15 +358,10 @@ class ResponderWaiting(BaseModel):
         
         # Create payload
         payload = SigmaResponderPayload(
-            nonce=Base64Bytes(nonce).to_base64(),
-            # Again TODO CS: transforming this here is really annoying
-            certificate=CertificatePayload(
-                identity=self.certificate.identity,
-                verify_key=self.certificate.verify_key,
-                signature=self.certificate.signature,
-            ),
+            nonce=nonce,
+            certificate=self.certificate,
             signature=sig,
-            mac=Base64Bytes(mac_val).to_base64(),
+            mac=mac_val,
         )
         
         # Encrypt and send message 2
@@ -388,8 +375,6 @@ class ResponderWaiting(BaseModel):
         )
         self.network.send_message(self.identity, self.peer, msg2)
 
-
-        # This swaps around the order
         responder_transcript = (
             ephemeral_public.encode() +
             received_ephem.encode() +
@@ -435,10 +420,8 @@ class ResponderWaitingForMsg3(BaseModel):
         ):
             raise ValueError("Initiator signature verification failed")
         
-        # Verify MAC
-        # TODO CS: use pynacl for hamc
         expected_mac = hmac(self.transcript, self.derived_key)
-        if expected_mac != Base64Bytes.validate(payload.mac, None):
+        if expected_mac != payload.mac:
             raise ValueError("Initiator MAC verification failed")
         
         print(f"Handshake complete between {self.peer} and {self.identity}. Session key established.")

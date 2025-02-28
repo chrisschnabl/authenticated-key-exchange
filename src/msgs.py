@@ -1,29 +1,27 @@
 from __future__ import annotations
+from typing import TypeAlias
 
 from pydantic import BaseModel
 
 from crypto_utils import Signature
-from sigma.serialization import PydanticVerifyKey
+from sigma.ca import Certificate
 
 
-# Payload models for encrypted data
-class CertificatePayload(BaseModel):
-    identity: str
-    verify_key: PydanticVerifyKey  # base64-encoded
-    signature: Signature  # base64-encoded
+Nonce: TypeAlias = bytes
+MAC: TypeAlias = bytes
 
 
 class SigmaResponderPayload(BaseModel):
-    nonce: str  # base64-encoded responder nonce
-    certificate: CertificatePayload
+    nonce: Nonce
+    certificate: Certificate
     signature: Signature
-    mac: str  # base64-encoded MAC
+    mac: MAC
 
 
 class SigmaInitiatorPayload(BaseModel):
-    certificate: CertificatePayload
+    certificate: Certificate
     signature: Signature
-    mac: str  # base64-encoded MAC
+    mac: MAC
 
 
 # Message models
