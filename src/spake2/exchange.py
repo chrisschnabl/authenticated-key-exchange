@@ -47,15 +47,12 @@ BasePoint: TypeAlias = bytes
 def create_transcript(context: Context, idA: Identity, idB: Identity, password: SymmetricKey) -> Transcript:
     """
     Create the protocol transcript according to RFC 9383 Section 3.1
+    Transcript = Hash(Context || idA || idB || Password)
     """
-    # Transcript = Hash(Context || idA || idB || Password)
     transcript_input = context + idA + idB + password
     return hash(transcript_input)
 
 def derive_scalar(transcript: Transcript) -> int:
-    """
-    Derive the scalar w from the transcript
-    """
     scalar_input = transcript + b"SPAKE2 w0"
     scalar_bytes = hash(scalar_input)
     return int_from_bytes(scalar_bytes) % curve.q
@@ -63,9 +60,11 @@ def derive_scalar(transcript: Transcript) -> int:
 
 def derive_keys(Z: bytes, transcript: Transcript, A_msg: bytes, B_msg: bytes) -> Tuple[SymmetricKey, SymmetricKey]:
     """
-    Derive the shared key and confirmation key as per RFC 9383 Section 3.1
+    Derive the shared key and confirmation key as per RFC 9383 Section 3.1 as
+    TT = Hash(transcript || A_msg || B_msg || Z)
+    K_shared = Hash(TT + b"SPAKE2 shared")
+    K_confirmation = Hash(TT + b"SPAKE2 confirmation")
     """
-    # TT = Hash(transcript || A_msg || B_msg || Z)
     TT = hash(transcript + A_msg + B_msg + Z)
     K_shared = hash(TT + b"SPAKE2 shared")        
     K_confirmation = hash(TT + b"SPAKE2 confirmation")
@@ -74,15 +73,13 @@ def derive_keys(Z: bytes, transcript: Transcript, A_msg: bytes, B_msg: bytes) ->
 
 def compute_public_element(private_scalar: int, w0: int, elem: BasePoint) -> PublicElement:
     """
-    Compute the public element based on role
-    """
-    # Ephemeral public element T = x*G + w*(M or N)
+    Ephemeral public element T = x*G + w*(M or N)
+    """ 
     T1 = curve.scalar_mult(G, private_scalar)
     T2 = curve.scalar_mult(elem, w0)
         
     T = curve.add(T1, T2)
     return curve.compress(T)
-    
 
 def derive_Z(element: PublicElement, elem: BasePoint, w0: int, private_scalar: int, q: int) -> SharedElement:
 
@@ -193,10 +190,6 @@ if __name__ == "__main__":
     context = b"SPAKE2 Example"
     idA = b"client@example.com"
     idB = b"server@example.com"
-
-    # Instantiate SPAKE2 for both parties with identities and context
-    #alice = SPAKE2(password=password, role="client", context=context, idA=idA, idB=idB)
-    #bob = SPAKE2(password=password, role="server", context=context, idA=idA, idB=idB)
 
     alice = Spake2Initial(password=password, context=context, idA=idA, idB=idB, role="client")
     bob = Spake2Initial(password=password, context=context, idA=idA, idB=idB, role="server")
