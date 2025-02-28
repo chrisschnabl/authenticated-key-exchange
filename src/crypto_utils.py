@@ -3,6 +3,7 @@ from nacl.signing import SigningKey, VerifyKey
 from nacl.bindings import crypto_scalarmult
 
 from nacl.hash import blake2b, sha256
+from nacl.public import PublicKey, PrivateKey
 
 # TODO CS: use better typing here
 Signature: TypeAlias = bytes
@@ -27,8 +28,8 @@ def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: bytes)
     except Exception:
         return False
 
-def derive_key(ephemeral_public: bytes, ephemeral_private: bytes) -> bytes:  # TODO CS: use typing here
-    shared_secret = crypto_scalarmult(bytes(ephemeral_private), bytes(ephemeral_public))
+def derive_key(ephemeral_public: PublicKey, ephemeral_private: PrivateKey) -> bytes:  # TODO CS: use typing here
+    shared_secret = crypto_scalarmult(ephemeral_private.encode(), ephemeral_public.encode())
     return sha256(shared_secret)[:32]
 
 def hmac(payload: bytes, key: bytes) -> bytes:

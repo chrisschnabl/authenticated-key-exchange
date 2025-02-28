@@ -12,7 +12,7 @@ class SimulatedNetwork:
     def __init__(self) -> None:
         self.users: dict[str, OnReceive] = defaultdict(on_receive_ignore)
 
-    def register_user(self, user: str, on_receive: OnReceive) -> None:
+    def register_user(self, user: str, on_receive: OnReceive = on_receive_ignore) -> None:
         self.users[user] = on_receive
 
     def send_message(self, sender: str, receiver: str, message: BaseModel) -> None:
