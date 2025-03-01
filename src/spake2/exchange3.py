@@ -98,10 +98,10 @@ class Spake2KeysBase(Generic[State, Message]):
     def _create_transcript(self, peer_point: bytes, K: bytes) -> bytes:
         raise NotImplementedError
     
-    def _create_confirmation(self, transcript: bytes, keys) -> Message:
+    def _create_confirmation(self, transcript: bytes, keys: bytes) -> Message:
         raise NotImplementedError
     
-    def _create_shared_keys(self, transcript: bytes, keys) -> State:
+    def _create_shared_keys(self, transcript: bytes, keys: bytes) -> State:
         raise NotImplementedError
 
 
