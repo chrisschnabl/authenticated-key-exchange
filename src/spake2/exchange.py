@@ -358,14 +358,14 @@ if __name__ == "__main__":
     alice = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
     bob = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
 
-    alice_msg, alice_keys = alice.derive_keys_client()
-    bob_msg, bob_keys = bob.derive_keys_server()
+    alice_msg: SPAKE2MessageClient, alice_keys: Spake2Keys = alice.derive_keys_client()
+    bob_msg: SPAKE2MessageServer, bob_keys: Spake2Keys = bob.derive_keys_server()
 
-    alice_mu, alice_unconfirmed = alice_keys.client(bob_msg)
-    bob_mu, bob_unconfirmed = bob_keys.server(alice_msg)
+    alice_mu: SPAKE2Message2Client, alice_unconfirmed: SharedKeysUnconfirmed = alice_keys.client(bob_msg)
+    bob_mu: SPAKE2Message2Server, bob_unconfirmed: SharedKeysUnconfirmed = bob_keys.server(alice_msg)
 
-    alice_confirmed = alice_unconfirmed.confirm_server(bob_mu)
-    bob_confirmed = bob_unconfirmed.confirm_client(alice_mu)
+    alice_confirmed: SharedKeysConfirmed = alice_unconfirmed.confirm_server(bob_mu)
+    bob_confirmed: SharedKeysConfirmed = bob_unconfirmed.confirm_client(alice_mu)
 
     print(f"Shared keys match: {alice_confirmed.shared_key.hex() == bob_confirmed.shared_key.hex()}")
     print(f"Confirmation keys match: {alice_confirmed.confirmation_key.hex() == bob_confirmed.confirmation_key.hex()}")

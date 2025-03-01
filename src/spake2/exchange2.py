@@ -132,11 +132,10 @@ class SPAKE2Protocol:
         
         self.w = self._process_password(password)
         
-        # For storing protocol state
         self.pA = None
         self.pB = None
         self.K = None
-        self.TT = None  # Transcript
+        self.TT = None 
         self.keys = None
     
     def _process_password(self, password: bytes) -> int:
@@ -222,12 +221,6 @@ class SPAKE2Client(SPAKE2Protocol):
         self._verified = False
         
     def start(self) -> SPAKE2MessageClient:
-        """
-        Start the protocol by generating the first message
-        
-        Returns:
-            The client's first message (pA)
-        """
         self._x = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
         if self._x == 0:
             self._x = 1
