@@ -1,4 +1,4 @@
-from spake2.exchange3 import Spake2Initial
+from spake2.exchange import Spake2Initial
 
 if __name__ == "__main__":
     # Example usage
