@@ -1,4 +1,4 @@
-from functools import singledispatch
+#from functools import singledispatch
 import pickle
 import secrets
 from typing import Self
@@ -53,7 +53,6 @@ class VerifiedUser(BaseModel):  # type: ignore
 
         return session.session_key
 
-    #@singledispatch
     def receive(self, msg: SigmaMessage, sender: Self) -> SigmaMessage:
         if isinstance(msg, SigmaMessage1):
             return self.receive_msg1(msg, sender)
@@ -63,7 +62,6 @@ class VerifiedUser(BaseModel):  # type: ignore
             return self.receive_msg3(msg, sender)
         raise ValueError(f"Unknown message type: {type(msg)}")
 
-    #@receive.register(SigmaMessage1)
     def receive_msg1(self, msg1: SigmaMessage1, sender: Self) -> SigmaMessage2:
         print(f"Received in dispath 1 from {sender.identity}")
 
@@ -111,7 +109,6 @@ class VerifiedUser(BaseModel):  # type: ignore
         )
 
     # TODO: can simplify this
-    #@receive.register(SigmaMessage2)
     def receive_msg2(self, msg: SigmaMessage2, sender: Self) -> SigmaMessage3:
         if sender.identity not in self.sessions:
             raise ValueError("No session started with this peer")
