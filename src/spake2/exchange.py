@@ -7,19 +7,15 @@ from spake2.types import AdditionalData, ClientConfirmation, ClientPublicKey, Co
 from spake2.rfc_steps.curve import derive_public_key, is_valid_point, generate_random_point, process_password
 from spake2.rfc_steps.transcript import KeySet, compute_confirmation, create_transcript, derive_keys
 
-curve = ExtendedEdwardsCurve()
-
 # Base point for Curve25519 from RFC8032
-G_COMPRESSED = bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666")
-
 # M and N points for Curve25519 as specified in RFC 9382 Section 6
+G_COMPRESSED = bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666")
 M_COMPRESSED = bytes.fromhex("d048032c6ea0b6d697ddc2e86bda85a33adac920f1bf18e1b0c6d166a5cecdaf")
 N_COMPRESSED = bytes.fromhex("d3bfb518f44f3430f29d0c92af503865a1ed3281dc69b35dd868ba85f886c4ab")
-
-# Decompress the constants for use
-G = curve.uncompress(G_COMPRESSED)
-M = curve.uncompress(M_COMPRESSED)
-N = curve.uncompress(N_COMPRESSED)
+CURVE = ExtendedEdwardsCurve()
+G = CURVE.uncompress(G_COMPRESSED)
+M = CURVE.uncompress(M_COMPRESSED)
+N = CURVE.uncompress(N_COMPRESSED)
 
 class SharedKeysConfirmed:
 
@@ -80,14 +76,14 @@ class ExchangeState(Generic[State, Message]):
     
     def exchange(self, message_element: Key) -> Tuple[Message, State]:
         element = message_element.value
-        if not is_valid_point(curve, message_element):
-            raise ValueError(f"Invalid message: point is not on the curve")
+        if not is_valid_point(CURVE, message_element):
+            raise ValueError(f"Invalid message: point is not on the CURVE")
         
         # Calculate K = scalar * (peer_point - w*point_constant)
-        peer_point_decoded = curve.uncompress(element)
-        w_const_neg = curve.scalar_mult(self.point_constant, (-self.w) % curve.q)
-        K_point = curve.scalar_mult(curve.add(peer_point_decoded, w_const_neg), self.scalar)
-        K: Key = Key(value=curve.compress(K_point))
+        peer_point_decoded = CURVE.uncompress(element)
+        w_const_neg = CURVE.scalar_mult(self.point_constant, (-self.w) % CURVE.q)
+        K_point = CURVE.scalar_mult(CURVE.add(peer_point_decoded, w_const_neg), self.scalar)
+        K: Key = Key(value=CURVE.compress(K_point))
         
         transcript: Transcript = self._create_transcript(message_element, K)
         keys: KeySet = derive_keys(transcript, self.aad)
@@ -156,17 +152,17 @@ class SharedPassword:
         self.aad = aad
         
         # Process password to derive w
-        self.w: int = process_password(curve, self.context.value, self.password)
+        self.w: int = process_password(CURVE, self.context.value, self.password)
     
     def client(self) -> Tuple[ClientPublicKey, Client]:
-        x: int = generate_random_point(curve)
+        x: int = generate_random_point(CURVE)
         x: int = x if x != 0 else 1
             
         # X = x*G
-        X: Point = curve.scalar_mult(G, x)
+        X: Point = CURVE.scalar_mult(G, x)
         
         # pA = w*M + X
-        pA: Key = derive_public_key(curve, self.w, M, X)
+        pA: Key = derive_public_key(CURVE, self.w, M, X)
         
         return ClientPublicKey(value=pA.value), Client(
             w=self.w,
@@ -178,14 +174,14 @@ class SharedPassword:
         )
     
     def server(self) -> Tuple[ServerPublicKey, Server]:
-        y: int = generate_random_point(curve)
+        y: int = generate_random_point(CURVE)
         y: int = y if y != 0 else 1
             
         # Y = y*G
-        Y: Point = curve.scalar_mult(G, y)
+        Y: Point = CURVE.scalar_mult(G, y)
         
         # pB = w*N + Y
-        pB: Key = derive_public_key(curve, self.w, N, Y)
+        pB: Key = derive_public_key(CURVE, self.w, N, Y)
         
         return ServerPublicKey(value=pB.value), Server(
             w=self.w,
