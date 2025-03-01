@@ -1,23 +1,23 @@
-
-from typing import Tuple
+from typing import Tuple, TypeVar, Generic, cast
 from pydantic import BaseModel, ConfigDict
 from crypto_utils import SymmetricKey
 from sigma.ca import Certificate, CertificateAuthority
 from nacl.public import PrivateKey, PublicKey
 from nacl.exceptions import CryptoError
 from nacl.secret import SecretBox
-from nacl.signing import SigningKey
+from nacl.signing import SigningKey, VerifyKey
 from crypto_utils import derive_key, sign_transcript, verify_signature, hmac
-from messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3
+from messages import SigmaInitiatorPayload, SigmaResponderPayload, SigmaMessage2, SigmaMessage3
 import pickle
 
-# TODO: typing
+T = TypeVar('T', bound='Session')
 
-class Session(BaseModel):  # type: ignore
-    ...
+class Session(BaseModel): # type: ignore
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class ReadySession(Session):
     session_key: SymmetricKey
+    peer_certificate: Certificate
 
 class InitiatedSession(Session):
     ca: CertificateAuthority
@@ -27,13 +27,9 @@ class InitiatedSession(Session):
     ephemeral_public: PublicKey
     nonce: bytes
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     def receive_message2(self, msg2: SigmaMessage2) -> Tuple[SigmaMessage3, ReadySession]:
-        """Process message 2 and send message 3, completing the handshake."""
-
-        response_ephem: bytes = msg2.ephemeral_pub.encode()
-        derived_key = derive_key(msg2.ephemeral_pub, self.ephemeral_private)
+        responder_ephem: PublicKey = msg2.ephemeral_pub
+        derived_key: SymmetricKey = derive_key(responder_ephem, self.ephemeral_private)
 
         box = SecretBox(derived_key)
         try:
@@ -41,12 +37,12 @@ class InitiatedSession(Session):
         except CryptoError as e:
             raise ValueError("Decryption failed") from e
 
-        payload: SigmaInitiatorPayload = pickle.loads(decrypted)
+        payload: SigmaResponderPayload = pickle.loads(decrypted)
         verified_cert = self.ca.verify_certificate(payload.certificate)
 
         transcript = (
             self.ephemeral_public.encode() +
-            response_ephem +
+            responder_ephem.encode() +
             self.nonce +
             payload.nonce
         )
@@ -58,43 +54,44 @@ class InitiatedSession(Session):
         ):
             raise ValueError("Responder signature verification failed")
 
-        if  hmac(transcript, derived_key) != payload.mac:
+        if hmac(transcript, derived_key) != payload.mac:
             raise ValueError("Responder MAC verification failed")
 
         transcript2 = (
-            response_ephem +
+            responder_ephem.encode() +
             self.ephemeral_public.encode() +
             payload.nonce +
             self.nonce
         )
-        sig = sign_transcript(self.signing_key, transcript2)
 
-        payload = SigmaInitiatorPayload(
+        initiator_sig = sign_transcript(self.signing_key, transcript2)
+        initiator_mac = hmac(transcript2, derived_key)
+
+        initiator_payload = SigmaInitiatorPayload(
             certificate=self.certificate,
-            signature=sig,
-            mac=hmac(transcript2, derived_key), # TODO CS: type this
+            signature=initiator_sig,
+            mac=initiator_mac,
         )
 
-        plaintext: bytes = pickle.dumps(payload)
+        plaintext: bytes = pickle.dumps(initiator_payload)
         encrypted: bytes = box.encrypt(plaintext)
         msg3 = SigmaMessage3(encrypted_payload=encrypted)
+
         ready_session = ReadySession(
             session_key=derived_key,
+            peer_certificate=verified_cert,
         )
 
         return msg3, ready_session
 
 
-class WaitingSession(BaseModel):  # type: ignore
-    """Responder waiting for message 3 from initiator."""
+class WaitingSession(Session):
     ca: CertificateAuthority
     transcript: bytes
-    derived_key: bytes
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    derived_key: SymmetricKey
+    responder_certificate: Certificate
 
     def receive_message3(self, msg3: SigmaMessage3) -> ReadySession:
-        """Process message 3, completing the handshake."""
         box = SecretBox(self.derived_key)
         try:
             plaintext = box.decrypt(msg3.encrypted_payload)
@@ -117,4 +114,5 @@ class WaitingSession(BaseModel):  # type: ignore
 
         return ReadySession(
             session_key=self.derived_key,
+            peer_certificate=verified_cert,
         )

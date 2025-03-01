@@ -1,7 +1,7 @@
-#from functools import singledispatch
 import pickle
 import secrets
-from typing import Self
+from typing import Self, Optional, Union, TypeVar, Callable, cast, TypeGuard
+from functools import wraps
 from nacl.exceptions import CryptoError
 from nacl.public import PrivateKey, PublicKey
 from nacl.secret import SecretBox
@@ -18,7 +18,9 @@ from messages import (
     SigmaResponderPayload,
 )
 
-class VerifiedUser(BaseModel):  # type: ignore
+T = TypeVar('T', bound=Session)
+
+class VerifiedUser(BaseModel): # type: ignore
     identity: str
     ca: CertificateAuthority
     certificate: Certificate
@@ -31,7 +33,7 @@ class VerifiedUser(BaseModel):  # type: ignore
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
 
-        self.sessions[peer] = InitiatedSession(  # Overwrite any existing session
+        self.sessions[peer] = InitiatedSession(
             ca=self.ca,
             certificate=self.certificate,
             signing_key=self.signing_key,
@@ -40,33 +42,37 @@ class VerifiedUser(BaseModel):  # type: ignore
             nonce=nonce,
         )
 
-        sigma_msg1: SigmaMessage1 = SigmaMessage1(ephemeral_pub=ephemeral_public, nonce=nonce)
-        return sigma_msg1
+        return SigmaMessage1(ephemeral_pub=ephemeral_public, nonce=nonce)
 
-    def get_session_key(self, peer: str) -> SymmetricKey:
+    def get_session(self, peer: str) -> Session:
         if peer not in self.sessions:
             raise ValueError("No session started with this peer")
+        return self.sessions[peer]
 
-        session: Session = self.sessions[peer]
-        if not isinstance(session, ReadySession):
-            raise ValueError(f"Session is in {type(session)} and not in the ready state")
+    def get_typed_session(self, peer: str, session_type: type[T]) -> T:
+        session = self.get_session(peer)
+        if not isinstance(session, session_type):
+            raise ValueError(f"Session is in {type(session).__name__} state, not {session_type.__name__}")
+        return session
 
-        return session.session_key
+    def get_session_key(self, peer: str) -> SymmetricKey:
+        return self.get_typed_session(peer, ReadySession).session_key
 
-    def receive(self, msg: SigmaMessage, sender: Self) -> SigmaMessage:
-        if isinstance(msg, SigmaMessage1):
-            return self.receive_msg1(msg, sender)
-        if isinstance(msg, SigmaMessage2):
-            return self.receive_msg2(msg, sender)
-        if isinstance(msg, SigmaMessage3):
-            return self.receive_msg3(msg, sender)
-        raise ValueError(f"Unknown message type: {type(msg)}")
+    def receive(self, msg: SigmaMessage, sender: Self) -> Optional[SigmaMessage]:
+        handlers = {
+            SigmaMessage1: self.receive_msg1,
+            SigmaMessage2: self.receive_msg2,
+            SigmaMessage3: self.receive_msg3
+        }
+
+        for msg_type, handler in handlers.items():
+            if isinstance(msg, msg_type):
+                return handler(msg, sender)
+
+        raise ValueError(f"Unknown message type: {type(msg).__name__}")
 
     def receive_msg1(self, msg1: SigmaMessage1, sender: Self) -> SigmaMessage2:
-        print(f"Received in dispath 1 from {sender.identity}")
-
-        # TODO: move this to session
-        received_ephem: PublicKey = msg1.ephemeral_pub
+        received_ephem = msg1.ephemeral_pub
         received_nonce = msg1.nonce
 
         ephemeral_private = PrivateKey.generate()
@@ -100,6 +106,7 @@ class VerifiedUser(BaseModel):  # type: ignore
             ca=self.ca,
             transcript=transcript_msg2,
             derived_key=derived_key,
+            responder_certificate=self.certificate,
         )
 
         plaintext = pickle.dumps(payload)
@@ -108,71 +115,33 @@ class VerifiedUser(BaseModel):  # type: ignore
             encrypted_payload=SecretBox(derived_key).encrypt(plaintext),
         )
 
-    # TODO: can simplify this
     def receive_msg2(self, msg: SigmaMessage2, sender: Self) -> SigmaMessage3:
-        if sender.identity not in self.sessions:
-            raise ValueError("No session started with this peer")
-
-        session: InitiatedSession = self.sessions[sender.identity]
-        if not isinstance(session, InitiatedSession):
-            raise ValueError("Session is not in the initiated state")
-
+        session = self.get_typed_session(sender.identity, InitiatedSession)
         msg3, ready_session = session.receive_message2(msg)
-        print(f"Received message 2 from {sender.identity}")
         self.sessions[sender.identity] = ready_session
         return msg3
 
-    #@receive.register(SigmaMessage3)
-    def receive_msg3(self, msg: SigmaMessage3, sender: Self) -> None:  # Sender has to be a VerifiedUser
-        if sender.identity not in self.sessions:
-            raise ValueError("No session started with this peer")
-
-        if not isinstance(self.sessions[sender.identity], WaitingSession):
-            raise ValueError("Session is not in the waiting state")
-
-        session: WaitingSession = self.sessions[sender.identity]
-        ready_session: ReadySession = session.receive_message3(msg)
-        print(f"Received message 3 from {sender.identity}")
+    def receive_msg3(self, msg: SigmaMessage3, sender: Self) -> None:
+        session = self.get_typed_session(sender.identity, WaitingSession)
+        ready_session = session.receive_message3(msg)
         self.sessions[sender.identity] = ready_session
+        return None
 
+    def send_secure_message(self, message: bytes, peer: str) -> None:
+        ready_session = self.get_typed_session(peer, ReadySession)
+        encrypted = ready_session.encrypt_message(message)
+        # Network handling would go here
 
-    def send_secure_message(self, message: bytes, peer: Self) -> None:
-        # TODO redo this with each time
-        if peer.identity not in self.sessions:
-            raise ValueError("No session started with this peer")
+    def receive_secure_message(self, encrypted: bytes, sender: str) -> bytes:
+        ready_session = self.get_typed_session(sender, ReadySession)
+        plaintext: bytes = ready_session.decrypt_message(encrypted)
+        return plaintext
 
-        session: ReadySession = self.sessions[peer.identity]
-        if not isinstance(session, ReadySession):
-            raise ValueError("Session is not in the ready state")
-
-        box = SecretBox(self.get_session_key(peer.identity))
-        encrypted = box.encrypt(message)
-
-        self.network.send_encrypted(self.identity, self.peer, encrypted)
-
-    def receive_secure_message(self, encrypted: bytes, sender: Self) -> bytes:
-        # TODO redo this with each time
-        if sender.identity not in self.sessions:
-            raise ValueError("No session started with this peer")
-
-        session: ReadySession = self.sessions[sender.identity]
-        if not isinstance(session, ReadySession):
-            raise ValueError("Session is not in the ready state")
-
-        box = SecretBox(self.get_session_key(sender.identity))
-        try:
-            decrypted: bytes = box.decrypt(encrypted)
-            return decrypted
-        except CryptoError as e:
-            raise ValueError("Decryption failed") from e
-
-class User(BaseModel):  # type: ignore
+class User(BaseModel): # type: ignore
     identity: str
     ca: CertificateAuthority
     signing_key: SigningKey
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
 
     def obtain_certificate(self) -> VerifiedUser:
         challenge = self.ca.generate_challenge(self.identity)
