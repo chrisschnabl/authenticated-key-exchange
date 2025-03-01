@@ -16,14 +16,12 @@ if __name__ == "__main__":
     alice_mu, alice_unconfirmed = alice_keys.client(bob_msg)
     bob_mu, bob_unconfirmed = bob_keys.server(alice_msg)
 
-    alice_confirmed = alice_unconfirmed.confirm_server(bob_mu)
-    bob_confirmed = bob_unconfirmed.confirm_client(alice_mu)
+    alice_confirmed = alice_unconfirmed.confirm(bob_mu)
+    bob_confirmed = bob_unconfirmed.confirm(alice_mu)
 
-    # Get shared keys
     client_key = alice_confirmed.get_shared_key()
     server_key = bob_confirmed.get_shared_key()
     
-    # Verify keys match
     print(f"Protocol completed successfully: {True}")
     print(f"Shared keys match: {client_key.hex() == server_key.hex()}")
     print(f"Shared key: {client_key.hex()}")

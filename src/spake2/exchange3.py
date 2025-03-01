@@ -2,6 +2,7 @@ import secrets
 from typing import Generic, Tuple, TypeVar
 
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
+
 from spake2.messages import SPAKE2ConfirmationMessage, SPAKE2MessageClient, SPAKE2MessageServer, SPAKE2ConfirmationClient, SPAKE2ConfirmationServer
 from spake2.spake2_utils import derive_public_key, is_valid_point, compute_confirmation, create_transcript, derive_keys, int_from_bytes, hash
 from spake2.types import Identity
@@ -28,39 +29,43 @@ class SharedKeysConfirmed:
     def get_shared_key(self) -> bytes:
         return self._ke
 
-class SharedKeysUnconfirmedClient:
+Message = TypeVar('Message', bound=SPAKE2ConfirmationMessage)
+
+class SharedKeysUnconfirmed(Generic[Message]):
     def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
         self._transcript = transcript
         self._ke = ke
         self._kcA = kcA
         self._kcB = kcB
 
-    def confirm_server(self, server_msg: SPAKE2ConfirmationServer) -> SharedKeysConfirmed:
-        expected_conf = compute_confirmation(self._transcript, self._kcB)
-        if server_msg.mac != expected_conf:
-            raise ValueError("Invalid server confirmation")
+    def confirm(self, message: Message) -> SharedKeysConfirmed:
+        expected_conf = self._compute_confirmation()
+        if message.mac != expected_conf:
+            raise ValueError("Invalid confirmation")
         
         return SharedKeysConfirmed(ke=self._ke)
-
-class SharedKeysUnconfirmedServer:
-    def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
-        self.transcript = transcript
-        self.ke = ke
-        self.kcA = kcA
-        self.kcB = kcB
     
-    def confirm_client(self, client_msg: SPAKE2ConfirmationClient) -> SharedKeysConfirmed:
-        expected_conf = compute_confirmation(self.transcript, self.kcA)
-        if client_msg.mac != expected_conf:
-            raise ValueError("Invalid client confirmation")
-        
-        return SharedKeysConfirmed(ke=self.ke)
+    def _compute_confirmation(self) -> bytes:
+        raise NotImplementedError
 
-from typing import Tuple, TypeVar, Generic
+
+class SharedKeysUnconfirmedClient(SharedKeysUnconfirmed[SPAKE2ConfirmationServer]):
+    def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
+        super().__init__(transcript, ke, kcA, kcB)
+
+    def _compute_confirmation(self) -> bytes:
+        return compute_confirmation(self._transcript, self._kcB)
+
+class SharedKeysUnconfirmedServer(SharedKeysUnconfirmed[SPAKE2ConfirmationClient]):
+    def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
+        super().__init__(transcript, ke, kcA, kcB)
+
+    def _compute_confirmation(self) -> bytes:
+        return compute_confirmation(self._transcript, self._kcA)
+
 
 
 State = TypeVar('State', bound=SharedKeysUnconfirmedClient | SharedKeysUnconfirmedServer)
-Message = TypeVar('Message', bound=SPAKE2ConfirmationMessage)
 
 class Spake2KeysBase(Generic[State, Message]):
     """Base class for SPAKE2 key exchange implementations using template method pattern"""
