@@ -10,6 +10,46 @@ from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
 from nacl.hash import sha256
 from nacl.encoding import HexEncoder
 
+
+# TODO list
+# MUSTS
+# Section 3 
+# - [ ] A MUST NOT consider the protocol complete until it receives and verifies cB.
+# - [ ] Likewise, B MUST NOT consider the protocol complete until it receives and verifies cA.
+
+# Section 3.3 
+# - [ ] K is a shared value, though it MUST NOT be used or output as a shared secret from the protocol. Both A and B must
+# - [ ] If an identity is absent, it is encoded as a zero-length string.
+#   This MUST only be done for applications in which identities are implicit
+
+# Section 4
+# - [ ] Applications MUST specify this encoding, typically by referring to the document defining the group. 
+# A MUST send B a key confirmation message so that both parties agree upon these shared secrets. The confirmation message cA is computed as a MAC over the protocol transcript TT, using KcA as follows: cA = MAC(KcA, TT). Similarly, B MUST send A a confirmation message using a MAC 
+# Keys MUST be at least 128 bits in length.
+
+# Section 5
+# - [ ] This variant MUST be used when it is not possible to determine whether A or B should use M (or N),
+#       - I.e. when the group is not known
+
+
+# Section 7
+# - [ ] check group membership of received elements from peers Section 7
+# - [ ] The choices of random numbers MUST be uniform. Randomly generated values, e.g., x and y, MUST NOT be reused
+#       - It is RECOMMENDED to generate these uniform numbers using rejection sampling# 
+# - [ ] Some implementations of elliptic curve multiplication may leak information about the length of the scalar. These MUST NOT be used.
+# - [ ]  Hashing of the transcript may take time depending only on the length of the transcript but not the contents
+# - [ ] The HMAC keys in this document are shorter than recommended in [RFC8032]
+
+
+# SHOULDS
+# Section 3.2
+# - [ ] For elliptic curves other than the ones in this document, the methods described in [RFC9380] SHOULD be used to generate M and N, e.g.,
+# - [ ] The hashing algorithm SHOULD be an MHF so as to slow down brute-force attackers.
+# -- might not be true
+# Section 7
+# - [ ] Applications that need augmented PAKEs should use the key confirmation mechanism
+
+
 curve = ExtendedEdwardsCurve()
 
 # Base point for Curve25519 from RFC8032
@@ -59,13 +99,17 @@ def create_transcript(context: Context, idA: Identity, idB: Identity, password: 
     return hash(transcript_input)
 
 def derive_scalar(transcript: Transcript) -> int:
+    # Domain seperation, specified in RFC 9383 
+    # Security improvement over using the transcript directly
+    # Protocols using this specification MUST define the method used to compute w. I.e. the method MUST be specified.
     scalar_input = transcript + b"SPAKE2 w0"
-    scalar_bytes = hash(scalar_input)
+    scalar_bytes = hash(scalar_input)  # Does not need to be a slow M
     return int_from_bytes(scalar_bytes) % curve.q
 
 
 def derive_keys(Z: bytes, transcript: Transcript, A_msg: bytes, B_msg: bytes) -> Tuple[SymmetricKey, SymmetricKey]:
     """
+    This deviates from the slide as follows:
     Derive the shared key and confirmation key as per RFC 9383 Section 3.1 as
     TT = Hash(transcript || A_msg || B_msg || Z)
     K_shared = Hash(TT + b"SPAKE2 shared")
@@ -99,7 +143,7 @@ def derive_Z(element: PublicElement, elem: BasePoint, w0: int, private_scalar: i
 
 
 def spake2_confirm(
-    k_conf: bytes,
+    k_conf: bytes, # TODO: type this , should be fixed lenght!!
     label: bytes,
     transcript: bytes,
     local_element: bytes,
@@ -111,11 +155,9 @@ def spake2_confirm(
     Note: k_conf is expected to be raw bytes (32 bytes).
     """
     data = transcript + local_element + peer_element + label
+    # T = idA + idB + A_msg + B_msg + Z + w
     return hmac(data, k_conf)
 
-# Elements received from a peer MUST be checked for group membership:
- #  failure to properly deserialize and validate group elements can lead
- #  to attacks.  
 
 # ---------------------------------------------------------------------------
 # SPAKE2 Message class
@@ -124,15 +166,23 @@ class SPAKE2Message(BaseModel):
     element: bytes = Field(..., min_length=32, max_length=32)  # TODO: do this for more fields in different
 
 class SPAKE2MessageClient(SPAKE2Message):
-    pass
+    ...
 
 class SPAKE2MessageServer(SPAKE2Message):
-    pass
+    ...
 
+class SPAKE2Message2(BaseModel):
+    element: bytes = Field(..., min_length=64, max_length=64)  # TODO: do this for more fields in different
+
+class SPAKE2Message2Server(SPAKE2Message2):
+    ...
+
+class SPAKE2Message2Client(SPAKE2Message2):
+    ...
 
 
 class SharedKeysConfirmed:
-    shared_key: SymmetricKey
+    shared_key: SymmetricKey  # TODO fixed length
     confirmation_key: SymmetricKey
 
     def __init__(
@@ -149,146 +199,154 @@ class SharedKeysUnconfirmed:
         self,
         shared_key: SymmetricKey,
         confirmation_key: SymmetricKey,
-        transcript: Transcript,
-        local_element: bytes,
-        peer_element: bytes,
-        local_label: bytes,
+        mu: bytes,  # TODO typed
     ):
-        self.shared_key = shared_key
-        self.confirmation_key = confirmation_key  # raw 32-byte key
-        self.transcript = transcript
-        self.local_element = local_element
-        self.peer_element = peer_element
-        self.local_label = local_label
-        # Precompute our local MAC (mu) for our role.
-        self.mu = spake2_confirm(
-            self.confirmation_key,
-            self.local_label,
-            self.transcript,
-            self.local_element,
-            self.peer_element,
-        )
+        self._shared_key = shared_key
+        self._confirmation_key = confirmation_key  # raw 32-byte key
+        self._mu = mu
 
-    def confirm_server(self, peer_mu: bytes) -> SharedKeysConfirmed:
-        expected = spake2_confirm(
-            self.confirmation_key,
-            b"server",
-            self.transcript,
-            self.peer_element,   # server's local element (T_B)
-            self.local_element,  # client's element (T_A)
-        )
-        if expected != peer_mu:
+    def confirm_server(self, peer_mu: SPAKE2Message2Server) -> SharedKeysConfirmed:  # TODOmake this a message
+        if self._mu != peer_mu.element:
             raise ValueError("Server confirmation MAC mismatch")
-        return SharedKeysConfirmed(self.shared_key, self.confirmation_key)
+        return SharedKeysConfirmed(self._shared_key, self._confirmation_key)
 
-    def confirm_client(self, peer_mu: bytes) -> SharedKeysConfirmed:
-        expected = spake2_confirm(
-            self.confirmation_key,
-            b"client",
-            self.transcript,
-            self.peer_element,   # client's local element (T_A)
-            self.local_element,  # server's element (T_B)
-        )
-        if expected != peer_mu:
+    def confirm_client(self, peer_mu: SPAKE2Message2Client) -> SharedKeysConfirmed:  # TOOD type the message os it cannot be wrong
+        # TODO: cs also runtime checks?
+
+        if self._mu != peer_mu.element:
             raise ValueError("Client confirmation MAC mismatch")
-        return SharedKeysConfirmed(self.shared_key, self.confirmation_key)
+        return SharedKeysConfirmed(self._shared_key, self._confirmation_key)
     
 class Spake2Keys:
+
+    SERVER_LABEL = b"server"
+    CLIENT_LABEL = b"client"
+
     def __init__(
         self,
         private_scalar: int,
         w0: int,
         transcript: Transcript,
-        public_element: bytes
+        public_element: BasePoint
     ):
-        self.private_scalar = private_scalar
-        self.w0 = w0
-        self.transcript = transcript
-        self.public_element = public_element
+        self._private_scalar = private_scalar
+        self._w0 = w0
+        self._transcript = transcript
+        self._public_element = public_element
 
-    def client(self, peer_message: SPAKE2MessageServer) -> SharedKeysUnconfirmed:
+    def client(self, peer_message: SPAKE2MessageServer) -> Tuple[SPAKE2Message2Client, SharedKeysUnconfirmed]:
         """
         The client receives T_B from the server (peer_message.element).
         Z = x * (T_B - w0*N).
         Then produce K_shared, K_confirmation, and local MAC labeled b"client".
         """
-        Z = derive_Z(peer_message.element, N, self.w0, self.private_scalar, curve.q)
+        Z = derive_Z(peer_message.element, N, self._w0, self._private_scalar, curve.q)
         K_shared, K_confirmation = derive_keys(
-            Z, self.transcript, self.public_element, peer_message.element
-        )
-        return SharedKeysUnconfirmed(
-            shared_key=K_shared,
-            confirmation_key=K_confirmation,
-            transcript=self.transcript,
-            local_element=self.public_element,  # T_A
-            peer_element=peer_message.element,  # T_B
-            local_label=b"client",
+            Z, self._transcript, self._public_element, peer_message.element
         )
 
-    def server(self, peer_message: SPAKE2MessageClient) -> SharedKeysUnconfirmed:
+        print("client K_confirmation")
+        print(K_confirmation)
+
+        mu = spake2_confirm(
+            K_confirmation,
+            self.CLIENT_LABEL,
+            self._transcript,
+            self._public_element,
+            peer_message.element,
+        )
+        peer_mu = spake2_confirm(
+            K_confirmation,
+            self.SERVER_LABEL,
+            self._transcript,
+            peer_message.element,
+            self._public_element,
+        )
+
+        print("client mu")
+        print(mu)
+        print("client peer_mu")
+        print(peer_mu)
+        return SPAKE2Message2Client(element=peer_mu), SharedKeysUnconfirmed(  # TODO wrap into message
+            shared_key=K_shared,
+            confirmation_key=K_confirmation,
+            mu=mu,
+        )
+
+    def server(self, peer_message: SPAKE2MessageClient) -> Tuple[SPAKE2Message2Server, SharedKeysUnconfirmed]:
         """
         The server receives T_A from the client (peer_message.element).
         Z = y * (T_A - w0*M).
         Then produce K_shared, K_confirmation, and local MAC labeled b"server".
         """
-        Z = derive_Z(peer_message.element, M, self.w0, self.private_scalar, curve.q)
+        Z = derive_Z(peer_message.element, M, self._w0, self._private_scalar, curve.q)
         K_shared, K_confirmation = derive_keys(
-            Z, self.transcript, peer_message.element, self.public_element
+            Z, self._transcript, peer_message.element, self._public_element
         )
-        return SharedKeysUnconfirmed(
+
+        print("server K_confirmation")
+        print(K_confirmation)
+
+        mu = spake2_confirm(
+            K_confirmation,
+            self.SERVER_LABEL,
+            self._transcript,   
+            self._public_element,
+            peer_message.element,
+        )
+
+        peer_mu = spake2_confirm(
+            K_confirmation,
+            self.CLIENT_LABEL,
+            self._transcript,
+            peer_message.element,
+            self._public_element,
+        )
+        print("server mu")
+        print(mu)
+        print("server peer_mu")
+        print(peer_mu)
+        return SPAKE2Message2Server(element=peer_mu), SharedKeysUnconfirmed(  # TODO wrap into message
             shared_key=K_shared,
             confirmation_key=K_confirmation,
-            transcript=self.transcript,
-            local_element=self.public_element,  # T_B
-            peer_element=peer_message.element,  # T_A
-            local_label=b"server",
+            mu=mu,
         )
 
 
 class Spake2Initial:
-    password: SymmetricKey
-    context: Context = b""
-    idA: Identity = b""
-    idB: Identity = b""
+    transcript: Transcript
 
     def __init__(
         self,
-        password: SymmetricKey,
         context: Context,
         idA: Identity,
         idB: Identity,
+        password: SymmetricKey
     ):
-        self.password = password
-        self.context = context
-        self.idA = idA
-        self.idB = idB
+        self.transcript: Transcript = create_transcript(context, idA, idB, password)
 
-    def derive_keys_client(self) -> Tuple[SPAKE2MessageClient, Spake2Keys]:  # TODO make the message typed
+    def derive_keys_client(self) -> Tuple[SPAKE2MessageClient, Spake2Keys]:
         keys = self._derive_keys(M)
-        return SPAKE2MessageClient(element=keys.public_element), keys
+        return SPAKE2MessageClient(element=keys._public_element), keys
     
-    def derive_keys_server(self) -> Tuple[SPAKE2MessageServer, Spake2Keys]:  # TODO make the message typed
+    def derive_keys_server(self) -> Tuple[SPAKE2MessageServer, Spake2Keys]:
         keys = self._derive_keys(N)
-        return SPAKE2MessageServer(element=keys.public_element), keys
+        return SPAKE2MessageServer(element=keys._public_element), keys
         
     def _derive_keys(self, elem: BasePoint) -> Spake2Keys:
         # Generate a random ephemeral scalar x in [1, q-1]
         private_scalar = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
-        if private_scalar == 0:  # Avoid a zero scalar.
-            private_scalar = 1
+        private_scalar = 1 if private_scalar == 0 else private_scalar  # avoid zero scalar
 
-        transcript = create_transcript(self.context, self.idA, self.idB, self.password)
-        w0 = derive_scalar(transcript)
-
+        w0 = derive_scalar(self.transcript)
         public_element = compute_public_element(private_scalar, w0, elem)
 
-        keys = Spake2Keys(
+        return Spake2Keys(
             private_scalar=private_scalar,
             w0=w0,
-            transcript=transcript,
+            transcript=self.transcript,
             public_element=public_element
         )
-        return keys
 
 
 if __name__ == "__main__":
@@ -303,21 +361,21 @@ if __name__ == "__main__":
     alice_msg, alice_keys = alice.derive_keys_client()
     bob_msg, bob_keys = bob.derive_keys_server()
 
-    alice_finished = alice_keys.client(bob_msg)
-    bob_finished = bob_keys.server(alice_msg)
+    alice_mu, alice_unconfirmed = alice_keys.client(bob_msg)
+    bob_mu, bob_unconfirmed = bob_keys.server(alice_msg)
 
-    alice_confirmed = alice_finished.confirm_server(bob_finished.mu)
-    bob_confirmed = bob_finished.confirm_client(alice_finished.mu)
+    alice_confirmed = alice_unconfirmed.confirm_server(bob_mu)
+    bob_confirmed = bob_unconfirmed.confirm_client(alice_mu)
 
-    print(f"Shared keys match: {alice_finished.shared_key.hex() == bob_finished.shared_key.hex()}")
-    print(f"Confirmation keys match: {alice_finished.confirmation_key.hex() == bob_finished.confirmation_key.hex()}")
+    print(f"Shared keys match: {alice_confirmed.shared_key.hex() == bob_confirmed.shared_key.hex()}")
+    print(f"Confirmation keys match: {alice_confirmed.confirmation_key.hex() == bob_confirmed.confirmation_key.hex()}")
 
     
-    print(alice_finished.shared_key.hex())
-    print(bob_finished.shared_key.hex())
+    print(alice_confirmed.shared_key.hex())
+    print(bob_confirmed.shared_key.hex())
     
-    print(alice_finished.confirmation_key.hex())
-    print(bob_finished.confirmation_key.hex())
+    print(alice_confirmed.confirmation_key.hex())
+    print(bob_confirmed.confirmation_key.hex())
 
     
     
