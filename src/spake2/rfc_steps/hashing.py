@@ -1,5 +1,6 @@
 from nacl.hash import sha256
 from nacl import pwhash
+
 def hash(data: bytes) -> bytes:
     """
     Hash function specified in RFC 9382 Section 6

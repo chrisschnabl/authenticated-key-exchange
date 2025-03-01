@@ -1,11 +1,12 @@
 from spake2.exchange import Spake2Initial
+from spake2.types import Context, Identity
 
 if __name__ == "__main__":
     # Example usage
     password = b"password123"
-    context = b"SPAKE2 Example"
-    idA = b"client@example.com"
-    idB = b"server@example.com"
+    context = Context(value=b"SPAKE2 Example")
+    idA = Identity(value=b"client1337@cam.ac.uk")
+    idB = Identity(value=b"server1337@cam.ac.uk")
 
     alice = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
     bob = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
@@ -23,5 +24,5 @@ if __name__ == "__main__":
     server_key = bob_confirmed.get_shared_key()
     
     print(f"Protocol completed successfully: {True}")
-    print(f"Shared keys match: {client_key.hex() == server_key.hex()}")
-    print(f"Shared key: {client_key.hex()}")
+    print(f"Shared keys match: {client_key.value.hex() == server_key.value.hex()}")
+    print(f"Shared key: {client_key.value.hex()}")
