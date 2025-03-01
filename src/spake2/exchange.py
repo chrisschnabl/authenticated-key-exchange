@@ -90,7 +90,7 @@ PublicElement: TypeAlias = bytes
 SharedElement: TypeAlias = bytes
 BasePoint: TypeAlias = bytes
 
-def create_transcript(context: Context, idA: Identity, idB: Identity, password: SymmetricKey) -> Transcript:
+def create_transcript2(context: Context, idA: Identity, idB: Identity, password: SymmetricKey) -> Transcript:
     """
     Create the protocol transcript according to RFC 9383 Section 3.1
     Transcript = Hash(Context || idA || idB || Password)
