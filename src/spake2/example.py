@@ -1,4 +1,4 @@
-from spake2.exchange import Spake2Initial
+from spake2.exchange import SharedPassword
 from spake2.types import Context, Identity
 
 if __name__ == "__main__":
@@ -8,17 +8,14 @@ if __name__ == "__main__":
     idA = Identity(value=b"client1337@cam.ac.uk")
     idB = Identity(value=b"server1337@cam.ac.uk")
 
-    alice = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
-    bob = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
+    pka, alice = SharedPassword(password=password, context=context, idA=idA, idB=idB).client()
+    pkb, bob = SharedPassword(password=password, context=context, idA=idA, idB=idB).server()
 
-    alice_msg, alice_keys = alice.derive_keys_client()
-    bob_msg, bob_keys = bob.derive_keys_server()
+    bob_confirmation, alice_exchange = alice.exchange(pkb)
+    alice_confirmation, bob_exchange = bob.exchange(pka)
 
-    alice_mu, alice_unconfirmed = alice_keys.client(bob_msg)
-    bob_mu, bob_unconfirmed = bob_keys.server(alice_msg)
-
-    alice_confirmed = alice_unconfirmed.confirm(bob_mu)
-    bob_confirmed = bob_unconfirmed.confirm(alice_mu)
+    alice_confirmed = alice_exchange.confirm(alice_confirmation)
+    bob_confirmed = bob_exchange.confirm(bob_confirmation)
 
     client_key = alice_confirmed.get_shared_key()
     server_key = bob_confirmed.get_shared_key()

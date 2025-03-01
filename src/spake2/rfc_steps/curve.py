@@ -1,9 +1,10 @@
+import secrets
+
 from ed25519.curve import Point
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
-import secrets
 from crypto_utils import int_from_bytes
 from spake2.rfc_steps.hashing import hash
-from spake2.types import CompressedPoint, Key
+from spake2.types import Key
 
 def process_password(curve: ExtendedEdwardsCurve, context: bytes, password: bytes) -> int:
     """
@@ -25,7 +26,7 @@ def derive_public_key(curve: ExtendedEdwardsCurve, w: int, point_constant: int, 
 def generate_random_point(curve: ExtendedEdwardsCurve) -> int:
     return int.from_bytes(secrets.token_bytes(32), "little") % curve.q
 
-def is_valid_point(curve: ExtendedEdwardsCurve, compressed_point: CompressedPoint) -> bool:
+def is_valid_point(curve: ExtendedEdwardsCurve, compressed_point: Key) -> bool:
     """
     Check if point is valid as required by RFC 9382 Section 7
     """

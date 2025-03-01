@@ -1,8 +1,8 @@
 from crypto_utils import hmac, int_to_bytes
 from spake2.rfc_steps.hashing import hash, hkdf
-from spake2.types import AdditionalData, Key, KeySet, Mac, Transcript, Identity, CompressedPoint
+from spake2.types import AdditionalData, Key, KeySet, Mac, Transcript, Identity
 
-def create_transcript(idA: Identity, idB: Identity, pA: CompressedPoint, pB: CompressedPoint, K: CompressedPoint, w: int) -> Transcript:
+def create_transcript(idA: Identity, idB: Identity, pA: Key, pB: Key, K: Key, w: int) -> Transcript:
     """
     Create the protocol transcript according to RFC 9382 Section 3.3
     

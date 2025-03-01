@@ -25,7 +25,6 @@ def sign_transcript(signing_key: SigningKey, transcript: bytes) -> Signature:
     return signing_key.sign(transcript).signature
 # TODO CS: type this in a way where we it is marhsalled
 
-
 def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: Signature) -> bool:
     """
     Verifies the signature on the transcript using the provided verify key.
