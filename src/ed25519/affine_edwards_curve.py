@@ -67,7 +67,8 @@ class AffineEdwardsCurve(EdwardsCurve):  # type: ignore
         x, y = P.x, P.y
         lhs = self.a * x**2 + y**2
         rhs = 1 + self.d * (x**2) * (y**2)
-        return abs(lhs - rhs) % self.p == 0
+        is_valid: bool = abs(lhs - rhs) % self.p == 0
+        return is_valid
 
     def compress(self, P: Point) -> bytes:
         """

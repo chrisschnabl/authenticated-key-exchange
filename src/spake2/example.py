@@ -1,5 +1,5 @@
 from spake2.exchange import SharedPassword
-from spake2.types import Context, Identity
+from spake2.spake_types import Context, Identity
 
 if __name__ == "__main__":
     # Example usage
@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     client_key = alice_confirmed.get_shared_key()
     server_key = bob_confirmed.get_shared_key()
-    
+
     print(f"Protocol completed successfully: {True}")
     print(f"Shared keys match: {client_key.value.hex() == server_key.value.hex()}")
     print(f"Shared key: {client_key.value.hex()}")
