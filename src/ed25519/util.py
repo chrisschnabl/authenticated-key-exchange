@@ -2,7 +2,6 @@ def modinv(x: int, p: int) -> int:
     """Modular inverse modulo p (p is prime)."""
     return pow(x, p - 2, p)
 
-
 def sqrt_mod(a: int, p: int) -> int:
     """
     Compute a square root of a modulo p using the following method:
