@@ -11,6 +11,12 @@ Signature: TypeAlias = bytes
 SymmetricKey: TypeAlias = bytes
 
 
+def int_from_bytes(b: bytes) -> int:
+    return int.from_bytes(b, "little")
+
+def int_to_bytes(i: int, length: int = 32) -> bytes:
+    return i.to_bytes(length, "little")
+
 def sign_transcript(signing_key: SigningKey, transcript: bytes) -> Signature:
     """
     Signs the given transcript using the provided signing key.

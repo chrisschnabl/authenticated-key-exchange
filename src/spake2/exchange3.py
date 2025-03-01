@@ -4,8 +4,11 @@ from typing import Generic, Tuple, TypeVar
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
 
 from spake2.messages import SPAKE2ConfirmationMessage, SPAKE2MessageClient, SPAKE2MessageServer, SPAKE2ConfirmationClient, SPAKE2ConfirmationServer
-from spake2.spake2_utils import derive_public_key, is_valid_point, compute_confirmation, create_transcript, derive_keys, int_from_bytes, hash
+
 from spake2.types import Identity
+
+from spake2.rfc_steps.curve import derive_public_key, is_valid_point, generate_random_point, process_password
+from spake2.rfc_steps.transcript import compute_confirmation, create_transcript, derive_keys
 
 curve = ExtendedEdwardsCurve()
 
@@ -165,17 +168,10 @@ class Spake2Initial:
         self.aad = aad
         
         # Process password to derive w
-        self.w = self._process_password(password)
-    
-    def _process_password(self, password: bytes) -> int:
-        """
-        Derive scalar w from RFC 9382 Section 3.2
-        """
-        hash_output = hash(self.context + b"pwd" + password)
-        return int_from_bytes(hash_output) % curve.q
+        self.w = process_password(curve, self.context, self.password)
     
     def derive_keys_client(self) -> Tuple[SPAKE2MessageClient, Spake2KeysClient]:
-        x = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
+        x = generate_random_point(curve)
         x = x if x != 0 else 1
             
         # X = x*G
@@ -194,7 +190,7 @@ class Spake2Initial:
         )
     
     def derive_keys_server(self) -> Tuple[SPAKE2MessageServer, Spake2KeysServer]:
-        y = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
+        y = generate_random_point(curve)
         y = y if y != 0 else 1
             
         # Y = y*G
