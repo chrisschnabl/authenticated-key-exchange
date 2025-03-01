@@ -1,245 +1,190 @@
-from __future__ import annotations
-
-import base64
+from functools import singledispatch
 import pickle
 import secrets
-from typing import Any, Tuple, TypeAlias
-
+from typing import Self
 from nacl.exceptions import CryptoError
 from nacl.public import PrivateKey, PublicKey
 from nacl.secret import SecretBox
-from nacl.signing import SigningKey, VerifyKey
+from nacl.signing import SigningKey
 from pydantic import BaseModel, ConfigDict
-# Assuming these are imported from other modules
+from session import InitiatedSession, ReadySession, Session, WaitingSession
 from sigma.ca import Certificate, CertificateAuthority
-from crypto_utils import SymmetricKey, derive_key, sign_transcript, verify_signature, hmac
+from crypto_utils import SymmetricKey, derive_key, sign_transcript, hmac
 from messages import (
-    SigmaInitiatorPayload,
+    SigmaMessage,
     SigmaMessage1,
     SigmaMessage2,
     SigmaMessage3,
     SigmaResponderPayload,
 )
-from crypto_utils import Signature
 
-# ------------------------------------------------------------------------------
-# Base User Class
-# ------------------------------------------------------------------------------
-
-class User(BaseModel):
+class VerifiedUser(BaseModel):  # type: ignore
     identity: str
-    ca: CertificateAuthority
-    signing_key: SigningKey
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    def obtain_certificate(self) -> VerifiedUser:
-        challenge = self.ca.generate_challenge(self.identity)
-        sig = self.signing_key.sign(challenge).signature
-        cert = self.ca.issue_certificate(self.identity, sig, self.signing_key.verify_key)
-        
-        return VerifiedUser(
-            ca=self.ca,
-            certificate=cert,
-            signing_key=self.signing_key,
-        )
-
-
-# ------------------------------------------------------------------------------
-# Verified User Class
-# ------------------------------------------------------------------------------
-
-class VerifiedUser(BaseModel):
     ca: CertificateAuthority
     certificate: Certificate
     signing_key: SigningKey
-
+    sessions: dict[str, Session] = {}
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def initiate_handshake(self) -> Tuple[SigmaMessage1, InitiatorWaiting]:
+    def initiate_handshake(self, peer: str) -> SigmaMessage1:
         ephemeral_private = PrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
-        
-        msg1 = SigmaMessage1(ephemeral_pub=ephemeral_public, nonce=nonce)
-        
-        return msg1, InitiatorWaiting(
-            certificate=self.certificate,
+
+        self.sessions[peer] = InitiatedSession(  # Overwrite any existing session
             ca=self.ca,
+            certificate=self.certificate,
             signing_key=self.signing_key,
             ephemeral_private=ephemeral_private,
             ephemeral_public=ephemeral_public,
             nonce=nonce,
         )
-    
-    # TODO CS: think about a multi-session paradigm here
-    def receive_message1(self, msg1: SigmaMessage1) -> Tuple[SigmaMessage2, ResponderWaitingForMsg3]:
+
+        sigma_msg1: SigmaMessage1 = SigmaMessage1(ephemeral_pub=ephemeral_public, nonce=nonce)
+        return sigma_msg1
+
+    def get_session_key(self, peer: str) -> SymmetricKey:
+        if peer not in self.sessions:
+            raise ValueError("No session started with this peer")
+
+        session: Session = self.sessions[peer]
+        if not isinstance(session, ReadySession):
+            raise ValueError(f"Session is in {type(session)} and not in the ready state")
+
+        return session.session_key
+
+    #@singledispatch
+    def receive(self, msg: SigmaMessage, sender: Self) -> SigmaMessage:
+        if isinstance(msg, SigmaMessage1):
+            return self.receive_msg1(msg, sender)
+        if isinstance(msg, SigmaMessage2):
+            return self.receive_msg2(msg, sender)
+        if isinstance(msg, SigmaMessage3):
+            return self.receive_msg3(msg, sender)
+        raise ValueError(f"Unknown message type: {type(msg)}")
+
+    #@receive.register(SigmaMessage1)
+    def receive_msg1(self, msg1: SigmaMessage1, sender: Self) -> SigmaMessage2:
+        print(f"Received in dispath 1 from {sender.identity}")
+
+        # TODO: move this to session
         received_ephem: PublicKey = msg1.ephemeral_pub
         received_nonce = msg1.nonce
-        
+
         ephemeral_private = PrivateKey.generate()
         ephemeral_public = ephemeral_private.public_key
         nonce = secrets.token_bytes(16)
-        
+
         derived_key = derive_key(received_ephem, ephemeral_private)
-        
+
         transcript = (
             received_ephem.encode() +
             ephemeral_public.encode() +
             received_nonce +
             nonce
         )
-        
+
         payload = SigmaResponderPayload(
             nonce=nonce,
             certificate=self.certificate,
             signature=sign_transcript(self.signing_key, transcript),
             mac=hmac(transcript, derived_key),
         )
-        
-        plaintext = pickle.dumps(payload)
-        msg2 = SigmaMessage2(
-            ephemeral_pub=ephemeral_public,
-            encrypted_payload=SecretBox(derived_key).encrypt(plaintext),
-        )
 
         transcript_msg2 = (
             ephemeral_public.encode() +
             received_ephem.encode() +
-            nonce +  
+            nonce +
             received_nonce
         )
 
-        return msg2, ResponderWaitingForMsg3(
+        self.sessions[sender.identity] = WaitingSession(
             ca=self.ca,
             transcript=transcript_msg2,
             derived_key=derived_key,
         )
 
+        plaintext = pickle.dumps(payload)
+        return SigmaMessage2(
+            ephemeral_pub=ephemeral_public,
+            encrypted_payload=SecretBox(derived_key).encrypt(plaintext),
+        )
 
-class Session(BaseModel):
-    ...
+    # TODO: can simplify this
+    #@receive.register(SigmaMessage2)
+    def receive_msg2(self, msg: SigmaMessage2, sender: Self) -> SigmaMessage3:
+        if sender.identity not in self.sessions:
+            raise ValueError("No session started with this peer")
 
-class ReadyUser(BaseModel):
-    """User session with an established secure session."""
-    session_key: SymmetricKey
+        session: InitiatedSession = self.sessions[sender.identity]
+        if not isinstance(session, InitiatedSession):
+            raise ValueError("Session is not in the initiated state")
 
-    #def send_secure_message(self, message: bytes) -> None:
-    #    """Send an authenticated and encrypted message using the established session key."""
-    #    box = SecretBox(self.session_key)
-    #    encrypted = box.encrypt(message)
+        msg3, ready_session = session.receive_message2(msg)
+        print(f"Received message 2 from {sender.identity}")
+        self.sessions[sender.identity] = ready_session
+        return msg3
 
-        #self.network.send_encrypted(self.identity, self.peer, encrypted)
-    
-    #def receive_secure_message(self, encrypted: bytes) -> bytes:
-    #    """Decrypt a received authenticated and encrypted message using the established session key."""
-    #    box = SecretBox(self.session_key)
-    #    try:
-    #        return box.decrypt(encrypted)
-    #   except CryptoError as e:
-    #        raise ValueError("Decryption failed") from e
+    #@receive.register(SigmaMessage3)
+    def receive_msg3(self, msg: SigmaMessage3, sender: Self) -> None:  # Sender has to be a VerifiedUser
+        if sender.identity not in self.sessions:
+            raise ValueError("No session started with this peer")
+
+        if not isinstance(self.sessions[sender.identity], WaitingSession):
+            raise ValueError("Session is not in the waiting state")
+
+        session: WaitingSession = self.sessions[sender.identity]
+        ready_session: ReadySession = session.receive_message3(msg)
+        print(f"Received message 3 from {sender.identity}")
+        self.sessions[sender.identity] = ready_session
 
 
+    def send_secure_message(self, message: bytes, peer: Self) -> None:
+        # TODO redo this with each time
+        if peer.identity not in self.sessions:
+            raise ValueError("No session started with this peer")
 
-class InitiatorWaiting(BaseModel):
-    """Initiator waiting for message 2 from responder."""
-    ca: CertificateAuthority
-    certificate: Certificate
-    signing_key: SigningKey
-    ephemeral_private: PrivateKey
-    ephemeral_public: PublicKey
-    nonce: bytes
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    def receive_message2(self, msg2: SigmaMessage2) -> Tuple[SigmaMessage3, ReadyUser]:
-        """Process message 2 and send message 3, completing the handshake."""
+        session: ReadySession = self.sessions[peer.identity]
+        if not isinstance(session, ReadySession):
+            raise ValueError("Session is not in the ready state")
 
-        response_ephem: bytes = msg2.ephemeral_pub.encode()
-        derived_key = derive_key(msg2.ephemeral_pub, self.ephemeral_private)
-        
-        box = SecretBox(derived_key)
+        box = SecretBox(self.get_session_key(peer.identity))
+        encrypted = box.encrypt(message)
+
+        self.network.send_encrypted(self.identity, self.peer, encrypted)
+
+    def receive_secure_message(self, encrypted: bytes, sender: Self) -> bytes:
+        # TODO redo this with each time
+        if sender.identity not in self.sessions:
+            raise ValueError("No session started with this peer")
+
+        session: ReadySession = self.sessions[sender.identity]
+        if not isinstance(session, ReadySession):
+            raise ValueError("Session is not in the ready state")
+
+        box = SecretBox(self.get_session_key(sender.identity))
         try:
-            decrypted = box.decrypt(msg2.encrypted_payload)
+            decrypted: bytes = box.decrypt(encrypted)
+            return decrypted
         except CryptoError as e:
             raise ValueError("Decryption failed") from e
-        
-        payload: SigmaInitiatorPayload = pickle.loads(decrypted)
-        verified_cert = self.ca.verify_certificate(payload.certificate)
-        
-        transcript = (
-            self.ephemeral_public.encode() +
-            response_ephem +
-            self.nonce +
-            payload.nonce
-        )
-        
-        if not verify_signature(
-            verified_cert.verify_key,
-            transcript,
-            payload.signature
-        ):
-            raise ValueError("Responder signature verification failed")
-        
 
-        if  hmac(transcript, derived_key) != payload.mac:
-            raise ValueError("Responder MAC verification failed")
-        
-        transcript2 = (
-            response_ephem +
-            self.ephemeral_public.encode() +
-            payload.nonce +
-            self.nonce
-        )
-        sig: Signature = sign_transcript(self.signing_key, transcript2)
-        
-        payload = SigmaInitiatorPayload(
-            certificate=self.certificate,
-            signature=sig,
-            mac=hmac(transcript2, derived_key), # TODO CS: type this
-        )
-        
-        # Encrypt and send message 3
-        plaintext = pickle.dumps(payload)
-        encrypted = box.encrypt(plaintext)
-        msg3 = SigmaMessage3(encrypted_payload=encrypted)
-        ready_user = ReadyUser(
-            session_key=derived_key,
-        )
-
-        return msg3, ready_user  # TODO CS: decide on one or the other paradigm
-
-
-class ResponderWaitingForMsg3(BaseModel):
-    """Responder waiting for message 3 from initiator."""
+class User(BaseModel):  # type: ignore
+    identity: str
     ca: CertificateAuthority
-    transcript: bytes
-    derived_key: bytes
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    def receive_message3(self, msg3: SigmaMessage3) -> ReadyUser:
-        """Process message 3, completing the handshake."""
-        box = SecretBox(self.derived_key)
-        try:
-            plaintext = box.decrypt(msg3.encrypted_payload)
-        except CryptoError as e:
-            raise ValueError("Decryption of message 3 failed") from e
-        
-        payload: SigmaInitiatorPayload = pickle.loads(plaintext)
-        verified_cert = self.ca.verify_certificate(payload.certificate)
+    signing_key: SigningKey
 
-        if not verify_signature(
-            verified_cert.verify_key,
-            self.transcript,
-            payload.signature
-        ):
-            raise ValueError("Initiator signature verification failed")
-        
-        expected_mac = hmac(self.transcript, self.derived_key)
-        if expected_mac != payload.mac:
-            raise ValueError("Initiator MAC verification failed")
-        
-        return ReadyUser(
-            session_key=self.derived_key,
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+    def obtain_certificate(self) -> VerifiedUser:
+        challenge = self.ca.generate_challenge(self.identity)
+        sig = self.signing_key.sign(challenge).signature
+        cert = self.ca.issue_certificate(self.identity, sig, self.signing_key.verify_key)
+
+        return VerifiedUser(
+            identity=self.identity,
+            ca=self.ca,
+            certificate=cert,
+            signing_key=self.signing_key,
         )

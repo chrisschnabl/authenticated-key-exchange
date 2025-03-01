@@ -1,79 +1,50 @@
 from nacl.signing import SigningKey
 
+from messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
 from network.simulated_network import SimulatedNetwork
 from sigma.ca import CertificateAuthority
-from user import User
-
-# ------------------------------------------------------------------------------
-# Demo Functions
-# ------------------------------------------------------------------------------
-
-
-def setup_users() -> tuple[User, User, SimulatedNetwork]:
-    """Set up a certificate authority and two users."""
-    ca = CertificateAuthority()
-    network = SimulatedNetwork()
-
-    # Create Alice
-    alice_signing_key = SigningKey.generate()
-    alice = User(identity="alice", ca=ca, signing_key=alice_signing_key, network=network)
-
-    # Create Bob
-    bob_signing_key = SigningKey.generate()
-    bob = User(identity="bob", ca=ca, signing_key=bob_signing_key, network=network)
-
-    # network.register_user("alice", on_receive_ignore)
-    # network.register_user("bob", on_receive_ignore)
-
-    return alice, bob, network
-
-
-def run_handshake(alice_user: User, bob_user: User, network: SimulatedNetwork) -> tuple[User, User]:
-    """Run the SIGMA handshake between Alice and Bob."""
-    print("\n=== Obtaining Certificates ===")
-
-    alice_verified = alice_user.obtain_certificate()
-    print("Alice obtained certificate")
-
-    bob_verified = bob_user.obtain_certificate()
-    print("Bob obtained certificate")
-
-    print("\n=== Starting Handshake: Alice initiates, Bob responds ===")
-
-    # Alice initiates
-    msg1, alice_initiator = alice_verified.initiate_handshake()  # TODO CS this should be one class
-
-    print("Alice sent Message 1 to Bob")
-
-    # Process message 1
-    msg2, bob_waiting = bob_verified.receive_message1(msg1)
-    print("Bob received Message 1, sent Message 2 to Alice")
-
-    # Process message 2
-    msg3, alice_ready = alice_initiator.receive_message2(msg2)
-    print("Alice received Message 2, sent Message 3 to Bob")
-
-    # Process message 3
-    bob_ready = bob_waiting.receive_message3(msg3)
-    print("Bob received Message 3, handshake complete")
-
-    return alice_ready, bob_ready
+from user import User, VerifiedUser
 
 
 def main() -> None:
     """Main function demonstrating the use of the SIGMA protocol."""
     print("=== SIGMA Protocol Demo ===")
 
-    # Setup users
-    alice, bob, network = setup_users()
 
-    # Run the handshake
-    alice_ready, bob_ready = run_handshake(alice, bob, network)
+    ca = CertificateAuthority()
+    network = SimulatedNetwork()
+
+
+    alice_signing_key = SigningKey.generate()
+    bob_signing_key = SigningKey.generate()
+    charlie_signing_key = SigningKey.generate()
+
+    alice: VerifiedUser = User(identity="alice", ca=ca, signing_key=alice_signing_key, network=network).obtain_certificate()
+    bob: VerifiedUser = User(identity="bob", ca=ca, signing_key=bob_signing_key, network=network).obtain_certificate()
+    charlie: VerifiedUser = User(identity="charlie", ca=ca, signing_key=charlie_signing_key, network=network).obtain_certificate()
+
+    alice_msg1: SigmaMessage1 = alice.initiate_handshake(bob.identity)
+    print(f"Alice sent message 1 to Bob, message 1:")
+    bob_msg2: SigmaMessage2 = bob.receive(alice_msg1, alice)
+    print(f"Bob received message 2 from Alice, message 2:")
+    alice_msg3: SigmaMessage3 = alice.receive(bob_msg2, bob)
+    print(f"Alice received message 3 from Bob, message 3:")
+    _ = bob.receive(alice_msg3, alice)
 
     print("\n=== Session Information ===")
-    print(f"Session key match: {alice_ready.session_key == bob_ready.session_key}")
+    print(f"Session key match: {alice.get_session_key(bob.identity) == bob.get_session_key(alice.identity)}")
 
-    print("\n=== Demo Complete ===")
+    alice_msg4: SigmaMessage1 = alice.initiate_handshake(charlie.identity)
+    print(f"Alice sent message 1 to Charlie, message 1:")
+    charlie_msg2: SigmaMessage2 = charlie.receive(alice_msg4, alice)
+    print(f"Charlie received message 2 from Alice, message 2:")
+    alice_msg5: SigmaMessage3 = alice.receive(charlie_msg2, charlie)
+    print(f"Alice received message 3 from Charlie, message 3:")
+    _ = charlie.receive(alice_msg5, alice)
+
+    print("\n=== Session Information ===")
+    print(f"Session key match: {alice.get_session_key(charlie.identity) == charlie.get_session_key(alice.identity)}")
+
 
 
 if __name__ == "__main__":

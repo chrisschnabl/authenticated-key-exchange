@@ -2,7 +2,7 @@ import secrets
 from typing import TypeAlias
 
 from nacl.signing import SigningKey, VerifyKey
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from crypto_utils import Signature
 
@@ -15,14 +15,11 @@ class Certificate(BaseModel):  # type: ignore
         Signature  # TODO CS: Keep this as SIgnature, todo veriyfy the length, needs to be 64 bytes
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-# TODO Use this actually
 class VerifiedCertificate(Certificate):
     pass
-
 
 Challenge: TypeAlias = bytes
 
