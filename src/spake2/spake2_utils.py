@@ -112,3 +112,12 @@ def compute_confirmation(transcript: bytes, key: bytes) -> bytes:
     Compute a confirmation MAC as specified in RFC 9382 Section 3.3
     """
     return hmac(transcript, key)
+
+
+def derive_public_key(curve, w: int, point_constant: bytes, peer_point: bytes) -> bytes:
+    # w*point_constant + peer_point
+    # point_constant is N or M
+    # peer_point is Y or X
+    w_const = curve.scalar_mult(point_constant, w)
+    pB_point = curve.add(w_const, peer_point)
+    return curve.compress(pB_point)

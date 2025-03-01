@@ -1,9 +1,9 @@
 import secrets
-from typing import Tuple
+from typing import Generic, Tuple, TypeVar
 
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
-from spake2.messages import SPAKE2MessageClient, SPAKE2MessageServer, SPAKE2ConfirmationClient, SPAKE2ConfirmationServer
-from spake2.spake2_utils import is_valid_point, compute_confirmation, create_transcript, derive_keys, int_from_bytes, hash
+from spake2.messages import SPAKE2ConfirmationMessage, SPAKE2MessageClient, SPAKE2MessageServer, SPAKE2ConfirmationClient, SPAKE2ConfirmationServer
+from spake2.spake2_utils import derive_public_key, is_valid_point, compute_confirmation, create_transcript, derive_keys, int_from_bytes, hash
 from spake2.types import Identity
 
 curve = ExtendedEdwardsCurve()
@@ -21,42 +21,28 @@ M = curve.uncompress(M_COMPRESSED)
 N = curve.uncompress(N_COMPRESSED)
 
 class SharedKeysConfirmed:
-    """
-    Class to hold confirmed shared key
-    """
+
     def __init__(self, ke: bytes):
-        self.ke = ke
+        self._ke = ke
 
     def get_shared_key(self) -> bytes:
-        """
-        Get the shared encryption key
-        """
-        return self.ke
+        return self._ke
 
 class SharedKeysUnconfirmedClient:
-    """
-    Class to hold unconfirmed derived keys and transcript for client
-    """
     def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
-        self.transcript = transcript
-        self.ke = ke
-        self.kcA = kcA
-        self.kcB = kcB
+        self._transcript = transcript
+        self._ke = ke
+        self._kcA = kcA
+        self._kcB = kcB
 
     def confirm_server(self, server_msg: SPAKE2ConfirmationServer) -> SharedKeysConfirmed:
-        """
-        Verify the server's confirmation message
-        """
-        expected_conf = compute_confirmation(self.transcript, self.kcB)
+        expected_conf = compute_confirmation(self._transcript, self._kcB)
         if server_msg.mac != expected_conf:
             raise ValueError("Invalid server confirmation")
         
-        return SharedKeysConfirmed(ke=self.ke)
+        return SharedKeysConfirmed(ke=self._ke)
 
 class SharedKeysUnconfirmedServer:
-    """
-    Class to hold unconfirmed derived keys and transcript for server
-    """
     def __init__(self, transcript: bytes, ke: bytes, kcA: bytes, kcB: bytes):
         self.transcript = transcript
         self.ke = ke
@@ -64,84 +50,100 @@ class SharedKeysUnconfirmedServer:
         self.kcB = kcB
     
     def confirm_client(self, client_msg: SPAKE2ConfirmationClient) -> SharedKeysConfirmed:
-        """
-        Verify the client's confirmation message
-        """
         expected_conf = compute_confirmation(self.transcript, self.kcA)
         if client_msg.mac != expected_conf:
             raise ValueError("Invalid client confirmation")
         
         return SharedKeysConfirmed(ke=self.ke)
 
-class Spake2KeysClient:
-    def __init__(self, w: int, x: int, idA: Identity, idB: Identity, 
-                 pA: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
+from typing import Tuple, TypeVar, Generic
+
+
+State = TypeVar('State', bound=SharedKeysUnconfirmedClient | SharedKeysUnconfirmedServer)
+Message = TypeVar('Message', bound=SPAKE2ConfirmationMessage)
+
+class Spake2KeysBase(Generic[State, Message]):
+    """Base class for SPAKE2 key exchange implementations using template method pattern"""
+    
+    def __init__(self, w: int, scalar: int, idA: Identity, idB: Identity, 
+                 own_point: bytes, point_constant: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
         self.w = w
-        self.x = x
+        self.scalar = scalar
         self.idA = idA if idA else b""
         self.idB = idB if idB else b""
-        self.pA = pA
+        self.own_point = own_point
+        self.point_constant = point_constant
         self.context = context
         self.aad = aad
-
-    def client(self, server_msg: SPAKE2MessageServer) -> Tuple[SPAKE2ConfirmationClient, SharedKeysUnconfirmedClient]:
-        """
-        Process server message and generate client confirmation
-        """
-        if not is_valid_point(curve, server_msg.element):
-            raise ValueError("Invalid server message: point is not on the curve")
+    
+    def process_message(self, message_element: bytes) -> Tuple[Message, State]:
+        if not is_valid_point(curve, message_element):
+            raise ValueError(f"Invalid message: point is not on the curve")
         
-        pB = server_msg.element
-        
-        # Calculate K = x * (pB - w*N)
-        pB_point = curve.uncompress(pB)
-        wN_neg = curve.scalar_mult(N, (-self.w) % curve.q)
-        temp = curve.add(pB_point, wN_neg)
-        K_point = curve.scalar_mult(temp, self.x)
-        
-        # Apply cofactor multiplication to prevent small subgroup confinement attacks
+        # Calculate K = scalar * (peer_point - w*point_constant)
+        peer_point_decoded = curve.uncompress(message_element)
+        w_const_neg = curve.scalar_mult(self.point_constant, (-self.w) % curve.q)
+        temp = curve.add(peer_point_decoded, w_const_neg)
+        K_point = curve.scalar_mult(temp, self.scalar)
         K = curve.compress(K_point)
         
-        transcript = create_transcript(self.idA, self.idB, self.pA, pB, K, self.w)
+        transcript = self._create_transcript(message_element, K)
         keys = derive_keys(transcript, self.aad)
-        client_conf = compute_confirmation(transcript, keys.kcA)
         
-        return SPAKE2ConfirmationClient(mac=client_conf), SharedKeysUnconfirmedClient(
+        confirmation = self._create_confirmation(transcript, keys)
+        shared_keys = self._create_shared_keys(transcript, keys)
+        
+        return confirmation, shared_keys
+    
+    def _create_transcript(self, peer_point: bytes, K: bytes) -> bytes:
+        raise NotImplementedError
+    
+    def _create_confirmation(self, transcript: bytes, keys) -> Message:
+        raise NotImplementedError
+    
+    def _create_shared_keys(self, transcript: bytes, keys) -> State:
+        raise NotImplementedError
+
+
+class Spake2KeysClient(Spake2KeysBase[SPAKE2ConfirmationClient, SharedKeysUnconfirmedClient]):    
+    def __init__(self, w: int, x: int, idA: Identity, idB: Identity, 
+                 pA: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
+        super().__init__(w, x, idA, idB, pA, N, context, aad)
+    
+    def client(self, server_msg: SPAKE2MessageServer) -> Tuple[SPAKE2ConfirmationClient, SharedKeysUnconfirmedClient]:
+        return self.process_message(server_msg.element)
+    
+    def _create_transcript(self, peer_point: bytes, K: bytes) -> bytes:
+        return create_transcript(self.idA, self.idB, self.own_point, peer_point, K, self.w)
+    
+    def _create_confirmation(self, transcript: bytes, keys) -> SPAKE2ConfirmationClient:
+        return SPAKE2ConfirmationClient(mac=compute_confirmation(transcript, keys.kcA))
+    
+    def _create_shared_keys(self, transcript: bytes, keys) -> SharedKeysUnconfirmedClient:
+        return SharedKeysUnconfirmedClient(
             transcript=transcript,
             ke=keys.ke,
             kcA=keys.kcA,
             kcB=keys.kcB
         )
 
-class Spake2KeysServer:
+
+class Spake2KeysServer(Spake2KeysBase[SPAKE2ConfirmationServer, SharedKeysUnconfirmedServer]):    
     def __init__(self, w: int, y: int, idA: Identity, idB: Identity, 
                  pB: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
-        self.w = w
-        self.y = y
-        self.idA = idA if idA else b""
-        self.idB = idB if idB else b""
-        self.pB = pB
-        self.context = context
-        self.aad = aad
-
+        super().__init__(w, y, idA, idB, pB, M, context, aad)
+    
     def server(self, client_msg: SPAKE2MessageClient) -> Tuple[SPAKE2ConfirmationServer, SharedKeysUnconfirmedServer]:
-        if not is_valid_point(curve, client_msg.element):
-            raise ValueError("Invalid client message: point is not on the curve")
-        
-        pA = client_msg.element
-        
-        # K = y * (pA - w*M)
-        pA_point = curve.uncompress(pA)
-        wM_neg = curve.scalar_mult(M, (-self.w) % curve.q)
-        temp = curve.add(pA_point, wM_neg)
-        K_point = curve.scalar_mult(temp, self.y)
-        
-        K = curve.compress(K_point)
-        transcript = create_transcript(self.idA, self.idB, pA, self.pB, K, self.w)
-        keys = derive_keys(transcript, self.aad)
-        server_conf = compute_confirmation(transcript, keys.kcB)
-        
-        return SPAKE2ConfirmationServer(mac=server_conf), SharedKeysUnconfirmedServer(
+        return self.process_message(client_msg.element)
+    
+    def _create_transcript(self, peer_point: bytes, K: bytes) -> bytes:
+        return create_transcript(self.idA, self.idB, peer_point, self.own_point, K, self.w)
+    
+    def _create_confirmation(self, transcript: bytes, keys) -> SPAKE2ConfirmationServer:
+        return SPAKE2ConfirmationServer(mac=compute_confirmation(transcript, keys.kcB))
+    
+    def _create_shared_keys(self, transcript: bytes, keys) -> SharedKeysUnconfirmedServer:
+        return SharedKeysUnconfirmedServer(
             transcript=transcript,
             ke=keys.ke,
             kcA=keys.kcA,
@@ -149,10 +151,6 @@ class Spake2KeysServer:
         )
 
 class Spake2Initial:
-    """
-    Initial class for SPAKE2 protocol that handles password processing
-    and first message generation
-    """
     def __init__(self, password: bytes, idA: Identity, idB: Identity, 
                  context: bytes = b"SPAKE2", aad: bytes = b""):
         self.idA = idA if idA else b""
@@ -166,25 +164,20 @@ class Spake2Initial:
     
     def _process_password(self, password: bytes) -> int:
         """
-        Process the password to derive scalar w from RFC 9382 Section 3.2
-        In a production implementation, this should use a memory-hard function like scrypt
+        Derive scalar w from RFC 9382 Section 3.2
         """
         hash_output = hash(self.context + b"pwd" + password)
         return int_from_bytes(hash_output) % curve.q
     
     def derive_keys_client(self) -> Tuple[SPAKE2MessageClient, Spake2KeysClient]:
-        # Generate client's ephemeral key
         x = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
-        if x == 0:
-            x = 1
+        x = x if x != 0 else 1
             
         # X = x*G
         X = curve.scalar_mult(G, x)
         
         # pA = w*M + X
-        wM = curve.scalar_mult(M, self.w)
-        pA_point = curve.add(wM, X)
-        pA = curve.compress(pA_point)
+        pA = derive_public_key(curve, self.w, M, X)
         
         return SPAKE2MessageClient(element=pA), Spake2KeysClient(
             w=self.w,
@@ -192,23 +185,18 @@ class Spake2Initial:
             idA=self.idA,
             idB=self.idB,
             pA=pA,
-            context=self.context,
             aad=self.aad
         )
     
     def derive_keys_server(self) -> Tuple[SPAKE2MessageServer, Spake2KeysServer]:
-        # Generate server's ephemeral key
         y = int.from_bytes(secrets.token_bytes(32), "little") % curve.q
-        if y == 0:
-            y = 1
+        y = y if y != 0 else 1
             
         # Y = y*G
         Y = curve.scalar_mult(G, y)
         
         # pB = w*N + Y
-        wN = curve.scalar_mult(N, self.w)
-        pB_point = curve.add(wN, Y)
-        pB = curve.compress(pB_point)
+        pB = derive_public_key(curve, self.w, N, Y)
         
         return SPAKE2MessageServer(element=pB), Spake2KeysServer(
             w=self.w,
@@ -216,6 +204,5 @@ class Spake2Initial:
             idA=self.idA,
             idB=self.idB,
             pB=pB,
-            context=self.context,
             aad=self.aad
         )
