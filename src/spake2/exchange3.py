@@ -1,10 +1,10 @@
 import secrets
-from typing import TypeAlias, Tuple
-
+from typing import Tuple
 
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
 from spake2.messages import SPAKE2MessageClient, SPAKE2MessageServer, SPAKE2ConfirmationClient, SPAKE2ConfirmationServer
 from spake2.spake2_utils import is_valid_point, compute_confirmation, create_transcript, derive_keys, int_from_bytes, hash
+from spake2.types import Identity
 
 curve = ExtendedEdwardsCurve()
 
@@ -19,14 +19,6 @@ N_COMPRESSED = bytes.fromhex("d3bfb518f44f3430f29d0c92af503865a1ed3281dc69b35dd8
 G = curve.uncompress(G_COMPRESSED)
 M = curve.uncompress(M_COMPRESSED)
 N = curve.uncompress(N_COMPRESSED)
-
-# Type aliases for clarity
-Identity: TypeAlias = bytes
-Context: TypeAlias = bytes
-Transcript: TypeAlias = bytes
-PublicElement: TypeAlias = bytes
-SharedElement: TypeAlias = bytes
-BasePoint: TypeAlias = bytes
 
 class SharedKeysConfirmed:
     """
@@ -82,9 +74,6 @@ class SharedKeysUnconfirmedServer:
         return SharedKeysConfirmed(ke=self.ke)
 
 class Spake2KeysClient:
-    """
-    Class to hold client's ephemeral keys and other state needed for SPAKE2 protocol
-    """
     def __init__(self, w: int, x: int, idA: Identity, idB: Identity, 
                  pA: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
         self.w = w
@@ -125,9 +114,6 @@ class Spake2KeysClient:
         )
 
 class Spake2KeysServer:
-    """
-    Class to hold server's ephemeral keys and other state needed for SPAKE2 protocol
-    """
     def __init__(self, w: int, y: int, idA: Identity, idB: Identity, 
                  pB: bytes, context: bytes = b"SPAKE2", aad: bytes = b""):
         self.w = w
@@ -139,9 +125,6 @@ class Spake2KeysServer:
         self.aad = aad
 
     def server(self, client_msg: SPAKE2MessageClient) -> Tuple[SPAKE2ConfirmationServer, SharedKeysUnconfirmedServer]:
-        """
-        Process client message and generate server confirmation
-        """
         if not is_valid_point(curve, client_msg.element):
             raise ValueError("Invalid client message: point is not on the curve")
         
@@ -236,32 +219,3 @@ class Spake2Initial:
             context=self.context,
             aad=self.aad
         )
-
-
-if __name__ == "__main__":
-    # Example usage
-    password = b"password123"
-    context = b"SPAKE2 Example"
-    idA = b"client@example.com"
-    idB = b"server@example.com"
-
-    alice = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
-    bob = Spake2Initial(password=password, context=context, idA=idA, idB=idB)
-
-    alice_msg, alice_keys = alice.derive_keys_client()
-    bob_msg, bob_keys = bob.derive_keys_server()
-
-    alice_mu, alice_unconfirmed = alice_keys.client(bob_msg)
-    bob_mu, bob_unconfirmed = bob_keys.server(alice_msg)
-
-    alice_confirmed = alice_unconfirmed.confirm_server(bob_mu)
-    bob_confirmed = bob_unconfirmed.confirm_client(alice_mu)
-
-    # Get shared keys
-    client_key = alice_confirmed.get_shared_key()
-    server_key = bob_confirmed.get_shared_key()
-    
-    # Verify keys match
-    print(f"Protocol completed successfully: {True}")
-    print(f"Shared keys match: {client_key.hex() == server_key.hex()}")
-    print(f"Shared key: {client_key.hex()}")

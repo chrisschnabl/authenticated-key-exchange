@@ -1,9 +1,11 @@
+from typing import TypeAlias
 from crypto_utils import hmac
 from nacl.hash import sha256
 
 from ed25519.extended_edwards_curve import ExtendedEdwardsCurve
 
-# TODO fix types!
+
+# TODO fix the types!
 
 def int_from_bytes(b: bytes) -> int:
     return int.from_bytes(b, "little")
