@@ -86,8 +86,6 @@ class TestCertificateAuthority:
         challenge = ca.generate_challenge(user_id)
         invalid_signature = SigningKey.generate().sign(challenge).signature
 
-        # Since the implementation raises BadSignatureError directly from PyNaCl
-        # we need to catch both ValueError and BadSignatureError
         with pytest.raises((ValueError, BadSignatureError)):
             ca.issue_certificate(user_id, invalid_signature, verify_key)
 
@@ -195,7 +193,7 @@ class TestAttackScenarios:
 
         ca.issue_certificate(alice_id, alice_signature, alice_verify)
 
-        bob_challenge = ca.generate_challenge(bob_id)
+        _ = ca.generate_challenge(bob_id)
 
         with pytest.raises((ValueError, BadSignatureError)):
             ca.issue_certificate(bob_id, alice_signature, bob_verify)
@@ -203,7 +201,7 @@ class TestAttackScenarios:
     def test_key_substitution(self, ca: CertificateAuthority) -> None:
         alice_id = "alice"
         alice_key = SigningKey.generate()
-        alice_verify = alice_key.verify_key
+        _ = alice_key.verify_key
 
         eve_key = SigningKey.generate()
         eve_verify = eve_key.verify_key
@@ -239,7 +237,6 @@ class TestAttackScenarios:
 
         signature1 = alice_key.sign(challenge1).signature
 
-        # Accept either ValueError or BadSignatureError
         with pytest.raises((ValueError, BadSignatureError)):
             ca.issue_certificate(alice_id, signature1, alice_verify)
 
@@ -315,7 +312,6 @@ class TestCertificateManagement:
         signature2 = alice_key.sign(challenge2).signature
         cert2 = ca2.issue_certificate(alice_id, signature2, alice_verify)
 
-        # Now verification works with both CAs
         verified1 = ca1.verify_certificate(cert)
         verified2 = ca2.verify_certificate(cert2)
 

@@ -84,7 +84,6 @@ class TestSigmaResponderPayload:
             mac=mac
         )
 
-        # Use model_dump/model_validate instead of pickle for Pydantic models
         serialized = payload.model_dump()
         deserialized = SigmaResponderPayload.model_validate(serialized)
 
@@ -169,14 +168,12 @@ class TestSigmaInitiatorPayload:
         assert payload.mac == mac
 
     def test_serialization(self, serializable_certificate: Certificate, signature: Signature, mac: MAC) -> None:
-        # Use the serializable certificate for this test
         payload = SigmaInitiatorPayload(
             certificate=serializable_certificate,
             signature=signature,
             mac=mac
         )
 
-        # Use model_dump/model_validate instead of pickle for Pydantic models
         serialized = payload.model_dump()
         deserialized = SigmaInitiatorPayload.model_validate(serialized)
 
@@ -204,8 +201,7 @@ class TestSigmaInitiatorPayload:
             )
 
     def test_invalid_types(self, certificate: Certificate, signature: Signature, mac: MAC) -> None:
-        # Test with None instead of "invalid" - Pydantic should reject None values
-        # for required fields with no default
+
         with pytest.raises((ValidationError, TypeError)):
             SigmaInitiatorPayload(
                 certificate=None,
@@ -262,8 +258,7 @@ class TestSigmaMessage1:
             )
 
     def test_invalid_types(self, ephemeral_key: PublicKey, nonce: Nonce) -> None:
-        # Test with None instead of "invalid" - Pydantic should reject None values
-        # for required fields with no default
+
         with pytest.raises((ValidationError, TypeError)):
             SigmaMessage1(
                 ephemeral_pub=None,
@@ -317,8 +312,6 @@ class TestSigmaMessage2:
     def test_invalid_types(self, ephemeral_key: PublicKey) -> None:
         encrypted_payload = secrets.token_bytes(64)
 
-        # Test with None instead of "invalid" - Pydantic should reject None values
-        # for required fields with no default
         with pytest.raises((ValidationError, TypeError)):
             SigmaMessage2(
                 ephemeral_pub=None,
@@ -357,8 +350,6 @@ class TestSigmaMessage3:
             SigmaMessage3()
 
     def test_invalid_types(self) -> None:
-        # Test with None instead of "invalid" - Pydantic should reject None values
-        # for required fields with no default
         with pytest.raises((ValidationError, TypeError)):
             SigmaMessage3(
                 encrypted_payload=None

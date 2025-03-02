@@ -19,6 +19,16 @@ class ReadySession(Session):
     session_key: SymmetricKey
     peer_certificate: Certificate
 
+    def encrypt_message(self, message: bytes) -> bytes:
+        box = SecretBox(self.session_key)
+        encrypted: bytes = box.encrypt(message)
+        return encrypted
+
+    def decrypt_message(self, encrypted: bytes) -> bytes:
+        box = SecretBox(self.session_key)
+        decrypted: bytes = box.decrypt(encrypted)
+        return decrypted
+
 class InitiatedSession(Session):
     ca: CertificateAuthority
     certificate: Certificate

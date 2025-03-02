@@ -235,7 +235,6 @@ class TestWaitingSession:
             # Make signature verification pass
             mock_verify.return_value = True
 
-            # Make MAC verification fail
             mock_hmac.return_value = b"different_mac"
 
             msg3 = SigmaMessage3(encrypted_payload=b"encrypted_payload")
@@ -289,7 +288,6 @@ class TestInitiatedSession:
             )
             mock_loads.return_value = responder_payload
 
-            # Certificate must have verify_key
             verified_cert = certificate
             initiated_session.ca.verify_certificate.return_value = verified_cert
 
@@ -305,16 +303,13 @@ class TestInitiatedSession:
 
             mock_encrypt.return_value = b"encrypted_payload"
 
-            # Create message
             msg2 = SigmaMessage2(
                 ephemeral_pub=PrivateKey.generate().public_key,
                 encrypted_payload=b"encrypted_msg2"
             )
 
-            # Call the method
             msg3, ready_session = initiated_session.receive_message2(msg2)
 
-            # Verify results
             assert isinstance(msg3, SigmaMessage3)
             assert msg3.encrypted_payload == b"encrypted_payload"
 
@@ -322,7 +317,6 @@ class TestInitiatedSession:
             assert ready_session.session_key == derived_key
             assert ready_session.peer_certificate == verified_cert
 
-            # Verify correct calls
             mock_derive.assert_called_once()
             mock_decrypt.assert_called_once_with(b"encrypted_msg2")
             mock_loads.assert_called_once_with(b"decrypted_payload")
@@ -401,7 +395,6 @@ class TestInitiatedSession:
             verified_cert = certificate
             initiated_session.ca.verify_certificate.return_value = verified_cert
 
-            # Make signature verification fail
             mock_verify.return_value = False
 
             msg2 = SigmaMessage2(
@@ -487,7 +480,6 @@ class TestIntegration:
              patch("session.SecretBox.encrypt") as mock_encrypt, \
              patch("session.SecretBox.decrypt") as mock_decrypt:
 
-            # Setup mocks
             derived_key = secrets.token_bytes(32)
             mock_derive.return_value = derived_key
 
@@ -497,7 +489,6 @@ class TestIntegration:
 
             mock_encrypt.return_value = b"encrypted_data"
 
-            # Setup payloads
             responder_payload = SigmaResponderPayload(
                 nonce=bob_nonce,
                 certificate=bob_cert,
@@ -511,7 +502,6 @@ class TestIntegration:
                 mac=b"mac"  # Match the return value of mock_hmac
             )
 
-            # Setup certificate verification
             alice_ca.verify_certificate = MagicMock(return_value=alice_cert)
             bob_ca.verify_certificate = MagicMock(return_value=bob_cert)
 
@@ -519,12 +509,11 @@ class TestIntegration:
             def mock_loads_side_effect(data: bytes) -> Any:
                 if mock_decrypt.call_count == 1:  # First decrypt call is for message 2
                     return responder_payload
-                else:  # Second decrypt call is for message 3
+                else:  # Second call is for message 3
                     return initiator_payload
 
             mock_loads.side_effect = mock_loads_side_effect
 
-            # Create sessions
             alice_session = InitiatedSession(
                 ca=alice_ca,
                 certificate=alice_cert,
@@ -534,20 +523,17 @@ class TestIntegration:
                 nonce=alice_nonce
             )
 
-            # Create message 2
             msg2 = SigmaMessage2(
                 ephemeral_pub=bob_ephemeral_public,
                 encrypted_payload=b"encrypted_responder_payload"
             )
 
-            # Alice processes message 2
             msg3, alice_ready = alice_session.receive_message2(msg2)
 
             assert isinstance(msg3, SigmaMessage3)
             assert isinstance(alice_ready, ReadySession)
             assert alice_ready.session_key == derived_key
 
-            # Create waiting session for Bob
             bob_transcript = (
                 bob_ephemeral_public.encode() +
                 alice_ephemeral_public.encode() +
@@ -600,7 +586,6 @@ class TestStateTransitionAttacks:
             verified_cert = certificate
             initiated_session.ca.verify_certificate.return_value = verified_cert
 
-            # Skip signature verification
             mock_verify.return_value = True
 
             # Valid MAC
@@ -616,7 +601,6 @@ class TestStateTransitionAttacks:
                 encrypted_payload=b"encrypted_msg2"
             )
 
-            # Even with a compromised CA, protocol should complete
             msg3, ready_session = initiated_session.receive_message2(msg2)
 
             assert isinstance(msg3, SigmaMessage3)
@@ -641,7 +625,6 @@ class TestStateTransitionAttacks:
 
             waiting_session.ca.verify_certificate.return_value = certificate
 
-            # Normal signature verification would pass
             mock_verify.return_value = True
 
             # But the MAC would fail due to transcript tampering
@@ -691,10 +674,8 @@ class TestStateTransitionAttacks:
                 encrypted_payload=b"encrypted_msg2"
             )
 
-            # Process normally
-            msg3, ready_session = initiated_session.receive_message2(msg2)
+            _, ready_session = initiated_session.receive_message2(msg2)
 
-            # Attempt session key disclosure attack
             attacker_session = ReadySession(
                 session_key=ready_session.session_key,
                 peer_certificate=certificate
@@ -751,7 +732,6 @@ class TestEncryptionAttacks:
                 mac=b"test_mac1"  # Reused MAC
             )
 
-            # First call setup
             mock_decrypt.return_value = b"first_decrypt"
             mock_loads.return_value = initiator_payload1
             waiting_session.ca.verify_certificate.return_value = certificate
@@ -760,12 +740,10 @@ class TestEncryptionAttacks:
 
             msg3_1 = SigmaMessage3(encrypted_payload=b"first_payload")
 
-            # First message processed successfully
             ready_session1 = waiting_session.receive_message3(msg3_1)
 
             assert isinstance(ready_session1, ReadySession)
 
-            # Reset the waiting session for replay
             waiting_session2 = WaitingSession(
                 ca=waiting_session.ca,
                 transcript=waiting_session.transcript,
@@ -773,11 +751,9 @@ class TestEncryptionAttacks:
                 responder_certificate=waiting_session.responder_certificate
             )
 
-            # Setup for the replay attempt
             mock_decrypt.return_value = b"replay_decrypt"
             mock_loads.return_value = initiator_payload2
 
-            # Force verification to fail for replay
             waiting_session2.ca.verify_certificate.side_effect = ValueError("Invalid certificate")
 
             msg3_2 = SigmaMessage3(encrypted_payload=b"replay_payload")
