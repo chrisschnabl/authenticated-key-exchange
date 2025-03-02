@@ -15,14 +15,14 @@ repos:
       - id: trailing-whitespace
 
   # ruff - linting + formatting
-  #- repo: https://github.com/astral-sh/ruff-pre-commit
-  #  rev: "v0.8.6"
-  #  hooks:
-  #    - id: ruff
-  #      name: ruff
-  #      args: [--fix]
-  #    - id: ruff-format
-  #      name: ruff-format
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "v0.8.6"
+    hooks:
+      - id: ruff
+        name: ruff
+        args: [--fix]
+      - id: ruff-format
+        name: ruff-format
 
   # mypy - lint-like type checking
   #- repo: local
