@@ -12,7 +12,7 @@ class TestSPAKE2Utils(unittest.TestCase):
     def test_compute_confirmation(self, mock_hmac: MagicMock) -> None:
         transcript = Transcript(value=b"test_transcript")
 
-        with patch("spake2.types.Key") as MockKey:
+        with patch("spake2.spake_types.Key") as MockKey:
             key_mock = MagicMock()
             key_mock.value = b"test_key_32_bytes_0123456789012345"  # 32 bytes to match validation
 

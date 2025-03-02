@@ -2,6 +2,12 @@
 
 # Run
 
+## Typing
+
+```bash
+uv run mypy
+```
+
 ## Locally
 
 Requires `uv` to be installed.

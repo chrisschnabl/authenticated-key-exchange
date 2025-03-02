@@ -1,307 +1,266 @@
-import pytest
-from typing import Any, Dict
 import secrets
-import pickle
+import unittest
 from unittest.mock import MagicMock
-from nacl.public import PublicKey, PrivateKey
+
+import pytest
+from nacl.public import PrivateKey
 from nacl.signing import VerifyKey
 from pydantic import ValidationError
 
 from messages import (
-    SigmaMessage,
-    SigmaResponderPayload,
     SigmaInitiatorPayload,
+    SigmaMessage,
     SigmaMessage1,
     SigmaMessage2,
     SigmaMessage3,
+    SigmaResponderPayload,
 )
 from sigma.ca import Certificate
-from crypto_utils import Nonce, MAC, Signature
 
 
-
-@pytest.fixture # type: ignore
-def certificate() -> Certificate:
-    # For non-serialization tests, we can use a MagicMock
+@pytest.fixture
+def certificate():
     cert_mock = MagicMock(spec=Certificate)
     cert_mock.identity = "test_user"
     cert_mock.signature = secrets.token_bytes(64)
-    # Add verify_key property to the mock
     verify_key = VerifyKey(secrets.token_bytes(32))
     type(cert_mock).verify_key = MagicMock(return_value=verify_key)
     return cert_mock
 
 
-@pytest.fixture # type: ignore
-def serializable_certificate() -> Certificate:
-    # For serialization tests, use our custom class
+@pytest.fixture
+def serializable_certificate():
     return Certificate(
         identity="test_user",
         verify_key=VerifyKey(secrets.token_bytes(32)),
-        signature=secrets.token_bytes(64)
+        signature=secrets.token_bytes(64),
     )
 
 
-@pytest.fixture # type: ignore
-def ephemeral_key() -> PublicKey:
+@pytest.fixture
+def ephemeral_key():
     return PrivateKey.generate().public_key
 
 
-@pytest.fixture # type: ignore
-def nonce() -> Nonce:
+@pytest.fixture
+def nonce():
     return secrets.token_bytes(16)
 
 
-@pytest.fixture # type: ignore
-def signature() -> Signature:
+@pytest.fixture
+def signature():
     return secrets.token_bytes(64)
 
 
-@pytest.fixture # type: ignore
-def mac() -> MAC:
+@pytest.fixture
+def mac():
     return secrets.token_bytes(32)
 
 
-class TestSigmaResponderPayload:
-    def test_creation(self, certificate: Certificate, nonce: Nonce, signature: Signature, mac: MAC) -> None:
+class BaseTest(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _setup_fixtures(self, request):
+        for fixture_name in getattr(self, "fixtures", []):
+            setattr(self, fixture_name, request.getfixturevalue(fixture_name))
+
+
+class TestSigmaResponderPayload(BaseTest):
+    fixtures = ["certificate", "serializable_certificate", "nonce", "signature", "mac"]
+
+    def test_creation(self):
         payload = SigmaResponderPayload(
-            nonce=nonce,
-            certificate=certificate,
-            signature=signature,
-            mac=mac
+            nonce=self.nonce, certificate=self.certificate, signature=self.signature, mac=self.mac
         )
 
-        assert payload.nonce == nonce
-        assert payload.certificate == certificate
-        assert payload.signature == signature
-        assert payload.mac == mac
+        self.assertEqual(payload.nonce, self.nonce)
+        self.assertEqual(payload.certificate, self.certificate)
+        self.assertEqual(payload.signature, self.signature)
+        self.assertEqual(payload.mac, self.mac)
 
-    def test_serialization(self, serializable_certificate: Certificate, nonce: Nonce, signature: Signature, mac: MAC) -> None:
+    def test_serialization(self):
         payload = SigmaResponderPayload(
-            nonce=nonce,
-            certificate=serializable_certificate,
-            signature=signature,
-            mac=mac
+            nonce=self.nonce,
+            certificate=self.serializable_certificate,
+            signature=self.signature,
+            mac=self.mac,
         )
 
         serialized = payload.model_dump()
         deserialized = SigmaResponderPayload.model_validate(serialized)
 
-        assert deserialized.nonce == payload.nonce
-        assert deserialized.certificate == payload.certificate
-        assert deserialized.signature == payload.signature
-        assert deserialized.mac == payload.mac
+        self.assertEqual(deserialized.nonce, payload.nonce)
+        self.assertEqual(deserialized.certificate, payload.certificate)
+        self.assertEqual(deserialized.signature, payload.signature)
+        self.assertEqual(deserialized.mac, payload.mac)
 
-    def test_missing_fields(self, certificate: Certificate, nonce: Nonce, signature: Signature, mac: MAC) -> None:
+    def test_missing_fields(self):
         with pytest.raises(ValidationError):
             SigmaResponderPayload(
-                nonce=nonce,
-                certificate=certificate,
-                signature=signature,
-            )
-
-        with pytest.raises(ValidationError):
-            SigmaResponderPayload(
-                nonce=nonce,
-                certificate=certificate,
-                mac=mac,
+                nonce=self.nonce,
+                certificate=self.certificate,
+                signature=self.signature,
             )
 
         with pytest.raises(ValidationError):
             SigmaResponderPayload(
-                nonce=nonce,
-                signature=signature,
-                mac=mac,
+                nonce=self.nonce,
+                certificate=self.certificate,
+                mac=self.mac,
             )
 
         with pytest.raises(ValidationError):
             SigmaResponderPayload(
-                certificate=certificate,
-                signature=signature,
-                mac=mac,
+                nonce=self.nonce,
+                signature=self.signature,
+                mac=self.mac,
             )
 
-    def test_invalid_types(self, certificate: Certificate, nonce: Nonce, signature: Signature, mac: MAC) -> None:
-        with pytest.raises((ValidationError, TypeError)):
+        with pytest.raises(ValidationError):
             SigmaResponderPayload(
-                nonce=None,
-                certificate=certificate,
-                signature=signature,
-                mac=mac
+                certificate=self.certificate,
+                signature=self.signature,
+                mac=self.mac,
             )
 
+    def test_invalid_types(self):
         with pytest.raises((ValidationError, TypeError)):
             SigmaResponderPayload(
-                nonce=nonce,
-                certificate=None,
-                signature=signature,
-                mac=mac
+                nonce=None, certificate=self.certificate, signature=self.signature, mac=self.mac
             )
 
         with pytest.raises((ValidationError, TypeError)):
             SigmaResponderPayload(
-                nonce=nonce,
-                certificate=certificate,
-                signature=None,
-                mac=mac
+                nonce=self.nonce, certificate=None, signature=self.signature, mac=self.mac
             )
 
         with pytest.raises((ValidationError, TypeError)):
             SigmaResponderPayload(
-                nonce=nonce,
-                certificate=certificate,
-                signature=signature,
-                mac=None
+                nonce=self.nonce, certificate=self.certificate, signature=None, mac=self.mac
+            )
+
+        with pytest.raises((ValidationError, TypeError)):
+            SigmaResponderPayload(
+                nonce=self.nonce, certificate=self.certificate, signature=self.signature, mac=None
             )
 
 
-class TestSigmaInitiatorPayload:
-    def test_creation(self, certificate: Certificate, signature: Signature, mac: MAC) -> None:
+class TestSigmaInitiatorPayload(BaseTest):
+    fixtures = ["certificate", "serializable_certificate", "signature", "mac"]
+
+    def test_creation(self):
         payload = SigmaInitiatorPayload(
-            certificate=certificate,
-            signature=signature,
-            mac=mac
+            certificate=self.certificate, signature=self.signature, mac=self.mac
         )
 
-        assert payload.certificate == certificate
-        assert payload.signature == signature
-        assert payload.mac == mac
+        self.assertEqual(payload.certificate, self.certificate)
+        self.assertEqual(payload.signature, self.signature)
+        self.assertEqual(payload.mac, self.mac)
 
-    def test_serialization(self, serializable_certificate: Certificate, signature: Signature, mac: MAC) -> None:
+    def test_serialization(self):
         payload = SigmaInitiatorPayload(
-            certificate=serializable_certificate,
-            signature=signature,
-            mac=mac
+            certificate=self.serializable_certificate, signature=self.signature, mac=self.mac
         )
 
         serialized = payload.model_dump()
         deserialized = SigmaInitiatorPayload.model_validate(serialized)
 
-        assert deserialized.certificate == payload.certificate
-        assert deserialized.signature == payload.signature
-        assert deserialized.mac == payload.mac
+        self.assertEqual(deserialized.certificate, payload.certificate)
+        self.assertEqual(deserialized.signature, payload.signature)
+        self.assertEqual(deserialized.mac, payload.mac)
 
-    def test_missing_fields(self, certificate: Certificate, signature: Signature, mac: MAC) -> None:
+    def test_missing_fields(self):
         with pytest.raises(ValidationError):
             SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=signature,
-            )
-
-        with pytest.raises(ValidationError):
-            SigmaInitiatorPayload(
-                certificate=certificate,
-                mac=mac,
+                certificate=self.certificate,
+                signature=self.signature,
             )
 
         with pytest.raises(ValidationError):
             SigmaInitiatorPayload(
-                signature=signature,
-                mac=mac,
+                certificate=self.certificate,
+                mac=self.mac,
             )
 
-    def test_invalid_types(self, certificate: Certificate, signature: Signature, mac: MAC) -> None:
+        with pytest.raises(ValidationError):
+            SigmaInitiatorPayload(
+                signature=self.signature,
+                mac=self.mac,
+            )
+
+    def test_invalid_types(self):
+        with pytest.raises((ValidationError, TypeError)):
+            SigmaInitiatorPayload(certificate=None, signature=self.signature, mac=self.mac)
 
         with pytest.raises((ValidationError, TypeError)):
-            SigmaInitiatorPayload(
-                certificate=None,
-                signature=signature,
-                mac=mac
-            )
+            SigmaInitiatorPayload(certificate=self.certificate, signature=None, mac=self.mac)
 
         with pytest.raises((ValidationError, TypeError)):
-            SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=None,
-                mac=mac
-            )
-
-        with pytest.raises((ValidationError, TypeError)):
-            SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=signature,
-                mac=None
-            )
+            SigmaInitiatorPayload(certificate=self.certificate, signature=self.signature, mac=None)
 
 
-class TestSigmaMessage1:
-    def test_creation(self, ephemeral_key: PublicKey, nonce: Nonce) -> None:
-        msg = SigmaMessage1(
-            ephemeral_pub=ephemeral_key,
-            nonce=nonce
-        )
+class TestSigmaMessage1(BaseTest):
+    fixtures = ["ephemeral_key", "nonce"]
 
-        assert msg.ephemeral_pub == ephemeral_key
-        assert msg.nonce == nonce
+    def test_creation(self):
+        msg = SigmaMessage1(ephemeral_pub=self.ephemeral_key, nonce=self.nonce)
 
-    def test_serialization(self, ephemeral_key: PublicKey, nonce: Nonce) -> None:
-        msg = SigmaMessage1(
-            ephemeral_pub=ephemeral_key,
-            nonce=nonce
-        )
+        self.assertEqual(msg.ephemeral_pub, self.ephemeral_key)
+        self.assertEqual(msg.nonce, self.nonce)
+
+    def test_serialization(self):
+        msg = SigmaMessage1(ephemeral_pub=self.ephemeral_key, nonce=self.nonce)
 
         serialized = msg.model_dump()
         deserialized = SigmaMessage1.model_validate(serialized)
 
-        assert deserialized.ephemeral_pub.encode() == msg.ephemeral_pub.encode()
-        assert deserialized.nonce == msg.nonce
+        self.assertEqual(deserialized.ephemeral_pub.encode(), msg.ephemeral_pub.encode())
+        self.assertEqual(deserialized.nonce, msg.nonce)
 
-    def test_missing_fields(self, ephemeral_key: PublicKey, nonce: Nonce) -> None:
+    def test_missing_fields(self):
         with pytest.raises(ValidationError):
             SigmaMessage1(
-                ephemeral_pub=ephemeral_key,
+                ephemeral_pub=self.ephemeral_key,
             )
 
         with pytest.raises(ValidationError):
             SigmaMessage1(
-                nonce=nonce,
+                nonce=self.nonce,
             )
 
-    def test_invalid_types(self, ephemeral_key: PublicKey, nonce: Nonce) -> None:
+    def test_invalid_types(self):
+        with pytest.raises((ValidationError, TypeError)):
+            SigmaMessage1(ephemeral_pub=None, nonce=self.nonce)
 
         with pytest.raises((ValidationError, TypeError)):
-            SigmaMessage1(
-                ephemeral_pub=None,
-                nonce=nonce
-            )
-
-        with pytest.raises((ValidationError, TypeError)):
-            SigmaMessage1(
-                ephemeral_pub=ephemeral_key,
-                nonce=None
-            )
+            SigmaMessage1(ephemeral_pub=self.ephemeral_key, nonce=None)
 
 
-class TestSigmaMessage2:
-    def test_creation(self, ephemeral_key: PublicKey) -> None:
+class TestSigmaMessage2(BaseTest):
+    fixtures = ["ephemeral_key"]
+
+    def test_creation(self):
         encrypted_payload = secrets.token_bytes(64)
-        msg = SigmaMessage2(
-            ephemeral_pub=ephemeral_key,
-            encrypted_payload=encrypted_payload
-        )
+        msg = SigmaMessage2(ephemeral_pub=self.ephemeral_key, encrypted_payload=encrypted_payload)
 
-        assert msg.ephemeral_pub == ephemeral_key
-        assert msg.encrypted_payload == encrypted_payload
+        self.assertEqual(msg.ephemeral_pub, self.ephemeral_key)
+        self.assertEqual(msg.encrypted_payload, encrypted_payload)
 
-    def test_serialization(self, ephemeral_key: PublicKey) -> None:
+    def test_serialization(self):
         encrypted_payload = secrets.token_bytes(64)
-        msg = SigmaMessage2(
-            ephemeral_pub=ephemeral_key,
-            encrypted_payload=encrypted_payload
-        )
+        msg = SigmaMessage2(ephemeral_pub=self.ephemeral_key, encrypted_payload=encrypted_payload)
 
         serialized = msg.model_dump()
         deserialized = SigmaMessage2.model_validate(serialized)
 
-        assert deserialized.ephemeral_pub.encode() == msg.ephemeral_pub.encode()
-        assert deserialized.encrypted_payload == msg.encrypted_payload
+        self.assertEqual(deserialized.ephemeral_pub.encode(), msg.ephemeral_pub.encode())
+        self.assertEqual(deserialized.encrypted_payload, msg.encrypted_payload)
 
-    def test_missing_fields(self, ephemeral_key: PublicKey) -> None:
+    def test_missing_fields(self):
         encrypted_payload = secrets.token_bytes(64)
 
         with pytest.raises(ValidationError):
             SigmaMessage2(
-                ephemeral_pub=ephemeral_key,
+                ephemeral_pub=self.ephemeral_key,
             )
 
         with pytest.raises(ValidationError):
@@ -309,121 +268,90 @@ class TestSigmaMessage2:
                 encrypted_payload=encrypted_payload,
             )
 
-    def test_invalid_types(self, ephemeral_key: PublicKey) -> None:
+    def test_invalid_types(self):
         encrypted_payload = secrets.token_bytes(64)
 
         with pytest.raises((ValidationError, TypeError)):
-            SigmaMessage2(
-                ephemeral_pub=None,
-                encrypted_payload=encrypted_payload
-            )
+            SigmaMessage2(ephemeral_pub=None, encrypted_payload=encrypted_payload)
 
         with pytest.raises((ValidationError, TypeError)):
-            SigmaMessage2(
-                ephemeral_pub=ephemeral_key,
-                encrypted_payload=None
-            )
+            SigmaMessage2(ephemeral_pub=self.ephemeral_key, encrypted_payload=None)
 
 
-class TestSigmaMessage3:
-    def test_creation(self) -> None:
+class TestSigmaMessage3(BaseTest):
+    def test_creation(self):
         encrypted_payload = secrets.token_bytes(64)
-        msg = SigmaMessage3(
-            encrypted_payload=encrypted_payload
-        )
+        msg = SigmaMessage3(encrypted_payload=encrypted_payload)
 
-        assert msg.encrypted_payload == encrypted_payload
+        self.assertEqual(msg.encrypted_payload, encrypted_payload)
 
-    def test_serialization(self) -> None:
+    def test_serialization(self):
         encrypted_payload = secrets.token_bytes(64)
-        msg = SigmaMessage3(
-            encrypted_payload=encrypted_payload
-        )
+        msg = SigmaMessage3(encrypted_payload=encrypted_payload)
 
         serialized = msg.model_dump()
         deserialized = SigmaMessage3.model_validate(serialized)
 
-        assert deserialized.encrypted_payload == msg.encrypted_payload
+        self.assertEqual(deserialized.encrypted_payload, msg.encrypted_payload)
 
-    def test_missing_fields(self) -> None:
+    def test_missing_fields(self):
         with pytest.raises(ValidationError):
             SigmaMessage3()
 
-    def test_invalid_types(self) -> None:
+    def test_invalid_types(self):
         with pytest.raises((ValidationError, TypeError)):
-            SigmaMessage3(
-                encrypted_payload=None
-            )
+            SigmaMessage3(encrypted_payload=None)
 
 
-class TestMessageInheritance:
-    def test_inheritance_hierarchy(self, ephemeral_key: PublicKey, nonce: Nonce, certificate: Certificate, signature: Signature, mac: MAC) -> None:
-        msg1 = SigmaMessage1(
-            ephemeral_pub=ephemeral_key,
-            nonce=nonce
-        )
+class TestMessageInheritance(BaseTest):
+    fixtures = ["ephemeral_key", "nonce", "certificate", "signature", "mac"]
+
+    def test_inheritance_hierarchy(self):
+        msg1 = SigmaMessage1(ephemeral_pub=self.ephemeral_key, nonce=self.nonce)
 
         encrypted_payload = secrets.token_bytes(64)
-        msg2 = SigmaMessage2(
-            ephemeral_pub=ephemeral_key,
-            encrypted_payload=encrypted_payload
-        )
+        msg2 = SigmaMessage2(ephemeral_pub=self.ephemeral_key, encrypted_payload=encrypted_payload)
 
-        msg3 = SigmaMessage3(
-            encrypted_payload=encrypted_payload
-        )
+        msg3 = SigmaMessage3(encrypted_payload=encrypted_payload)
 
         responder_payload = SigmaResponderPayload(
-            nonce=nonce,
-            certificate=certificate,
-            signature=signature,
-            mac=mac
+            nonce=self.nonce, certificate=self.certificate, signature=self.signature, mac=self.mac
         )
 
         initiator_payload = SigmaInitiatorPayload(
-            certificate=certificate,
-            signature=signature,
-            mac=mac
+            certificate=self.certificate, signature=self.signature, mac=self.mac
         )
 
-        assert isinstance(msg1, SigmaMessage)
-        assert isinstance(msg2, SigmaMessage)
-        assert isinstance(msg3, SigmaMessage)
-        assert isinstance(responder_payload, SigmaMessage)
-        assert isinstance(initiator_payload, SigmaMessage)
+        self.assertIsInstance(msg1, SigmaMessage)
+        self.assertIsInstance(msg2, SigmaMessage)
+        self.assertIsInstance(msg3, SigmaMessage)
+        self.assertIsInstance(responder_payload, SigmaMessage)
+        self.assertIsInstance(initiator_payload, SigmaMessage)
 
-    def test_polymorphic_container(self, ephemeral_key: PublicKey, nonce: Nonce, certificate: Certificate, signature: Signature, mac: MAC) -> None:
-        messages: list[SigmaMessage] = [
-            SigmaMessage1(
-                ephemeral_pub=ephemeral_key,
-                nonce=nonce
-            ),
+    def test_polymorphic_container(self):
+        messages = [
+            SigmaMessage1(ephemeral_pub=self.ephemeral_key, nonce=self.nonce),
             SigmaMessage2(
-                ephemeral_pub=ephemeral_key,
-                encrypted_payload=secrets.token_bytes(64)
+                ephemeral_pub=self.ephemeral_key, encrypted_payload=secrets.token_bytes(64)
             ),
-            SigmaMessage3(
-                encrypted_payload=secrets.token_bytes(64)
-            ),
+            SigmaMessage3(encrypted_payload=secrets.token_bytes(64)),
             SigmaResponderPayload(
-                nonce=nonce,
-                certificate=certificate,
-                signature=signature,
-                mac=mac
+                nonce=self.nonce,
+                certificate=self.certificate,
+                signature=self.signature,
+                mac=self.mac,
             ),
             SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=signature,
-                mac=mac
-            )
+                certificate=self.certificate, signature=self.signature, mac=self.mac
+            ),
         ]
 
-        assert len(messages) == 5
-        assert isinstance(messages[0], SigmaMessage1)
-        assert isinstance(messages[1], SigmaMessage2)
-        assert isinstance(messages[2], SigmaMessage3)
-        assert isinstance(messages[3], SigmaResponderPayload)
-        assert isinstance(messages[4], SigmaInitiatorPayload)
+        self.assertEqual(len(messages), 5)
+        self.assertIsInstance(messages[0], SigmaMessage1)
+        self.assertIsInstance(messages[1], SigmaMessage2)
+        self.assertIsInstance(messages[2], SigmaMessage3)
+        self.assertIsInstance(messages[3], SigmaResponderPayload)
+        self.assertIsInstance(messages[4], SigmaInitiatorPayload)
 
 
 if __name__ == "__main__":

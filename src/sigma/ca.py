@@ -21,6 +21,7 @@ class Certificate(BaseModel):  # type: ignore
 class VerifiedCertificate(Certificate):
     pass
 
+
 Challenge: TypeAlias = bytes
 
 

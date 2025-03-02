@@ -1,112 +1,122 @@
-import pytest
-from typing import Tuple
 import secrets
+import unittest
 
-from nacl.signing import SigningKey, VerifyKey
+import pytest
 from nacl.exceptions import BadSignatureError
+from nacl.signing import SigningKey, VerifyKey
 
 from sigma.ca import (
     Certificate,
-    VerifiedCertificate,
     CertificateAuthority,
+    VerifiedCertificate,
 )
 
 
-@pytest.fixture # type: ignore
-def ca() -> CertificateAuthority:
+@pytest.fixture
+def ca():
     return CertificateAuthority()
 
 
-@pytest.fixture # type: ignore
-def user_keys() -> Tuple[str, SigningKey, VerifyKey]:
+@pytest.fixture
+def user_keys():
     user_id = "alice"
     signing_key = SigningKey.generate()
     verify_key = signing_key.verify_key
     return user_id, signing_key, verify_key
 
 
-class TestCertificateAuthority:
-    def test_ca_initialization(self) -> None:
+class BaseTest(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _setup_fixtures(self, request):
+        for fixture_name in getattr(self, "fixtures", []):
+            setattr(self, fixture_name, request.getfixturevalue(fixture_name))
+
+
+class TestCertificateAuthority(BaseTest):
+    fixtures = ["ca", "user_keys"]
+
+    def test_ca_initialization(self):
         ca = CertificateAuthority()
-        assert isinstance(ca._signing_key, SigningKey)
-        assert isinstance(ca.verify_key, VerifyKey)
-        assert ca._verified_users == {}
-        assert ca._challenges_pending == {}
+        self.assertIsInstance(ca._signing_key, SigningKey)
+        self.assertIsInstance(ca.verify_key, VerifyKey)
+        self.assertEqual(ca._verified_users, {})
+        self.assertEqual(ca._challenges_pending, {})
 
-    def test_generate_challenge(self, ca: CertificateAuthority) -> None:
+    def test_generate_challenge(self):
         user_id = "alice"
-        challenge = ca.generate_challenge(user_id)
+        challenge = self.ca.generate_challenge(user_id)
 
-        assert isinstance(challenge, bytes)
-        assert len(challenge) == 32
-        assert user_id in ca._challenges_pending
-        assert ca._challenges_pending[user_id] == challenge
+        self.assertIsInstance(challenge, bytes)
+        self.assertEqual(len(challenge), 32)
+        self.assertIn(user_id, self.ca._challenges_pending)
+        self.assertEqual(self.ca._challenges_pending[user_id], challenge)
 
-    def test_generate_multiple_challenges(self, ca: CertificateAuthority) -> None:
-        challenge1 = ca.generate_challenge("alice")
-        challenge2 = ca.generate_challenge("bob")
+    def test_generate_multiple_challenges(self):
+        challenge1 = self.ca.generate_challenge("alice")
+        challenge2 = self.ca.generate_challenge("bob")
 
-        assert "alice" in ca._challenges_pending
-        assert "bob" in ca._challenges_pending
-        assert challenge1 != challenge2
+        self.assertIn("alice", self.ca._challenges_pending)
+        self.assertIn("bob", self.ca._challenges_pending)
+        self.assertNotEqual(challenge1, challenge2)
 
-    def test_regenerate_challenge(self, ca: CertificateAuthority) -> None:
-        challenge1 = ca.generate_challenge("alice")
-        challenge2 = ca.generate_challenge("alice")
+    def test_regenerate_challenge(self):
+        challenge1 = self.ca.generate_challenge("alice")
+        challenge2 = self.ca.generate_challenge("alice")
 
-        assert challenge1 != challenge2
-        assert ca._challenges_pending["alice"] == challenge2
+        self.assertNotEqual(challenge1, challenge2)
+        self.assertEqual(self.ca._challenges_pending["alice"], challenge2)
 
-    def test_issue_certificate_successful(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_issue_certificate_successful(self):
+        user_id, signing_key, verify_key = self.user_keys
 
-        challenge = ca.generate_challenge(user_id)
+        challenge = self.ca.generate_challenge(user_id)
         signature = signing_key.sign(challenge).signature
 
-        certificate = ca.issue_certificate(user_id, signature, verify_key)
+        certificate = self.ca.issue_certificate(user_id, signature, verify_key)
 
-        assert isinstance(certificate, Certificate)
-        assert certificate.identity == user_id
-        assert certificate.verify_key == verify_key
-        assert user_id in ca._verified_users
-        assert ca._verified_users[user_id] == verify_key
-        assert user_id not in ca._challenges_pending
+        self.assertIsInstance(certificate, Certificate)
+        self.assertEqual(certificate.identity, user_id)
+        self.assertEqual(certificate.verify_key, verify_key)
+        self.assertIn(user_id, self.ca._verified_users)
+        self.assertEqual(self.ca._verified_users[user_id], verify_key)
+        self.assertNotIn(user_id, self.ca._challenges_pending)
 
-    def test_issue_certificate_no_challenge(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_issue_certificate_no_challenge(self):
+        user_id, signing_key, verify_key = self.user_keys
 
         signature = signing_key.sign(b"some data").signature
 
         with pytest.raises(ValueError, match="User has not requested a challenge"):
-            ca.issue_certificate(user_id, signature, verify_key)
+            self.ca.issue_certificate(user_id, signature, verify_key)
 
-    def test_issue_certificate_invalid_signature(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_issue_certificate_invalid_signature(self):
+        user_id, signing_key, verify_key = self.user_keys
 
-        challenge = ca.generate_challenge(user_id)
+        challenge = self.ca.generate_challenge(user_id)
         invalid_signature = SigningKey.generate().sign(challenge).signature
 
         with pytest.raises((ValueError, BadSignatureError)):
-            ca.issue_certificate(user_id, invalid_signature, verify_key)
+            self.ca.issue_certificate(user_id, invalid_signature, verify_key)
 
-        assert user_id not in ca._verified_users
-        assert user_id not in ca._challenges_pending
+        self.assertNotIn(user_id, self.ca._verified_users)
+        self.assertNotIn(user_id, self.ca._challenges_pending)
 
-    def test_verify_certificate_successful(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_verify_certificate_successful(self):
+        user_id, signing_key, verify_key = self.user_keys
 
-        challenge = ca.generate_challenge(user_id)
+        challenge = self.ca.generate_challenge(user_id)
         signature = signing_key.sign(challenge).signature
-        certificate = ca.issue_certificate(user_id, signature, verify_key)
+        certificate = self.ca.issue_certificate(user_id, signature, verify_key)
 
-        verified = ca.verify_certificate(certificate)
+        verified = self.ca.verify_certificate(certificate)
 
-        assert isinstance(verified, VerifiedCertificate)
-        assert verified.identity == certificate.identity
-        assert verified.verify_key == certificate.verify_key
-        assert verified.signature == certificate.signature
+        self.assertIsInstance(verified, VerifiedCertificate)
+        self.assertEqual(verified.identity, certificate.identity)
+        self.assertEqual(verified.verify_key, certificate.verify_key)
+        self.assertEqual(verified.signature, certificate.signature)
 
-    def test_verify_certificate_unknown_user(self, ca: CertificateAuthority) -> None:
+    def test_verify_certificate_unknown_user(self):
+        ca = CertificateAuthority()
         other_ca = CertificateAuthority()
         user_id = "alice"
         signing_key = SigningKey.generate()
@@ -119,42 +129,43 @@ class TestCertificateAuthority:
         with pytest.raises(ValueError, match="User has not been verified"):
             ca.verify_certificate(certificate)
 
-    def test_certificate_serialization(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_certificate_serialization(self) -> None:
+        user_id, signing_key, verify_key = self.user_keys
 
-        challenge = ca.generate_challenge(user_id)
+        challenge = self.ca.generate_challenge(user_id)
         signature = signing_key.sign(challenge).signature
-        certificate = ca.issue_certificate(user_id, signature, verify_key)
+        certificate = self.ca.issue_certificate(user_id, signature, verify_key)
 
         serialized = certificate.model_dump()
         loaded_cert = Certificate.model_validate(serialized)
 
-        assert loaded_cert.identity == certificate.identity
-        assert loaded_cert.verify_key == certificate.verify_key
-        assert loaded_cert.signature == certificate.signature
+        self.assertEqual(loaded_cert.identity, certificate.identity)
+        self.assertEqual(loaded_cert.verify_key, certificate.verify_key)
+        self.assertEqual(loaded_cert.signature, certificate.signature)
 
-        verified = ca.verify_certificate(loaded_cert)
-        assert isinstance(verified, VerifiedCertificate)
+        verified = self.ca.verify_certificate(loaded_cert)
+        self.assertIsInstance(verified, VerifiedCertificate)
 
 
-class TestAttackScenarios:
-    def test_forged_certificate(self, ca: CertificateAuthority) -> None:
+class TestAttackScenarios(BaseTest):
+    fixtures = ["ca", "user_keys"]
+
+    def test_forged_certificate(self) -> None:
+        ca = CertificateAuthority()
         user_id = "mallory"
         verify_key = SigningKey.generate().verify_key
 
         forged_signature = secrets.token_bytes(64)
         forged_cert = Certificate(
-            identity=user_id,
-            verify_key=verify_key,
-            signature=forged_signature
+            identity=user_id, verify_key=verify_key, signature=forged_signature
         )
 
         with pytest.raises(ValueError, match="User has not been verified"):
             ca.verify_certificate(forged_cert)
 
-    def test_tampered_certificate(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
-
+    def test_tampered_certificate(self) -> None:
+        user_id, signing_key, verify_key = self.user_keys
+        ca = CertificateAuthority()
         challenge = ca.generate_challenge(user_id)
         signature = signing_key.sign(challenge).signature
         certificate = ca.issue_certificate(user_id, signature, verify_key)
@@ -162,24 +173,26 @@ class TestAttackScenarios:
         tampered_cert = Certificate(
             identity="mallory",  # Changed identity
             verify_key=certificate.verify_key,
-            signature=certificate.signature
+            signature=certificate.signature,
         )
 
         with pytest.raises(ValueError, match="User has not been verified"):
             ca.verify_certificate(tampered_cert)
 
-    def test_replay_challenge(self, ca: CertificateAuthority, user_keys: Tuple[str, SigningKey, VerifyKey]) -> None:
-        user_id, signing_key, verify_key = user_keys
+    def test_replay_challenge(self):
+        ca = CertificateAuthority()
+        user_id, signing_key, verify_key = self.user_keys
 
         challenge = ca.generate_challenge(user_id)
         signature = signing_key.sign(challenge).signature
 
-        certificate = ca.issue_certificate(user_id, signature, verify_key)
+        _ = ca.issue_certificate(user_id, signature, verify_key)
 
         with pytest.raises(ValueError, match="User has not requested a challenge"):
             ca.issue_certificate(user_id, signature, verify_key)
 
-    def test_signature_reuse(self, ca: CertificateAuthority) -> None:
+    def test_signature_reuse(self):
+        ca = CertificateAuthority()
         alice_id = "alice"
         alice_key = SigningKey.generate()
         alice_verify = alice_key.verify_key
@@ -198,7 +211,7 @@ class TestAttackScenarios:
         with pytest.raises((ValueError, BadSignatureError)):
             ca.issue_certificate(bob_id, alice_signature, bob_verify)
 
-    def test_key_substitution(self, ca: CertificateAuthority) -> None:
+    def test_key_substitution(self):
         alice_id = "alice"
         alice_key = SigningKey.generate()
         _ = alice_key.verify_key
@@ -206,13 +219,13 @@ class TestAttackScenarios:
         eve_key = SigningKey.generate()
         eve_verify = eve_key.verify_key
 
-        challenge = ca.generate_challenge(alice_id)
+        challenge = self.ca.generate_challenge(alice_id)
         signature = alice_key.sign(challenge).signature
 
         with pytest.raises((ValueError, BadSignatureError)):
-            ca.issue_certificate(alice_id, signature, eve_verify)
+            self.ca.issue_certificate(alice_id, signature, eve_verify)
 
-    def test_certificate_from_different_ca(self) -> None:
+    def test_certificate_from_different_ca(self):
         ca1 = CertificateAuthority()
         ca2 = CertificateAuthority()
 
@@ -227,13 +240,14 @@ class TestAttackScenarios:
         with pytest.raises(ValueError, match="User has not been verified"):
             ca2.verify_certificate(certificate)
 
-    def test_race_condition_challenge(self, ca: CertificateAuthority) -> None:
+    def test_race_condition_challenge(self) -> None:
+        ca = CertificateAuthority()
         alice_id = "alice"
         alice_key = SigningKey.generate()
         alice_verify = alice_key.verify_key
 
         challenge1 = ca.generate_challenge(alice_id)
-        challenge2 = ca.generate_challenge(alice_id)
+        _ = ca.generate_challenge(alice_id)
 
         signature1 = alice_key.sign(challenge1).signature
 
@@ -246,9 +260,10 @@ class TestAttackScenarios:
 
         cert = ca.issue_certificate(alice_id, signature3, alice_verify)
 
-        assert isinstance(cert, Certificate)
+        self.assertIsInstance(cert, Certificate)
 
-    def test_multiple_identity_verification(self, ca: CertificateAuthority) -> None:
+    def test_multiple_identity_verification(self) -> None:
+        ca = CertificateAuthority()
         alice_key = SigningKey.generate()
         alice_verify = alice_key.verify_key
 
@@ -268,13 +283,14 @@ class TestAttackScenarios:
         verified1 = ca.verify_certificate(cert1)
         verified2 = ca.verify_certificate(cert2)
 
-        assert verified1.identity == alice_id1
-        assert verified2.identity == alice_id2
-        assert verified1.verify_key == verified2.verify_key
+        self.assertEqual(verified1.identity, alice_id1)
+        self.assertEqual(verified2.identity, alice_id2)
+        self.assertEqual(verified1.verify_key, verified2.verify_key)
 
 
-class TestCertificateManagement:
-    def test_multiple_users(self, ca: CertificateAuthority) -> None:
+class TestCertificateManagement(BaseTest):
+    def test_multiple_users(self) -> None:
+        ca = CertificateAuthority()
         users = {}
         for name in ["alice", "bob", "charlie", "dave"]:
             key = SigningKey.generate()
@@ -284,11 +300,11 @@ class TestCertificateManagement:
             cert = ca.issue_certificate(name, signature, verify)
             users[name] = (key, cert)
 
-        assert len(ca._verified_users) == 4
+        self.assertEqual(len(ca._verified_users), 4)
 
         for name, (_, cert) in users.items():
             verified = ca.verify_certificate(cert)
-            assert verified.identity == name
+            self.assertEqual(verified.identity, name)
 
     def test_cross_verification(self) -> None:
         ca1 = CertificateAuthority()
@@ -298,16 +314,13 @@ class TestCertificateManagement:
         alice_key = SigningKey.generate()
         alice_verify = alice_key.verify_key
 
-        # Get certificate from CA1
         challenge = ca1.generate_challenge(alice_id)
         signature = alice_key.sign(challenge).signature
         cert = ca1.issue_certificate(alice_id, signature, alice_verify)
 
-        # Try to verify with CA2
         with pytest.raises(ValueError):
             ca2.verify_certificate(cert)
 
-        # Get certificate from CA2 as well
         challenge2 = ca2.generate_challenge(alice_id)
         signature2 = alice_key.sign(challenge2).signature
         cert2 = ca2.issue_certificate(alice_id, signature2, alice_verify)
@@ -315,11 +328,12 @@ class TestCertificateManagement:
         verified1 = ca1.verify_certificate(cert)
         verified2 = ca2.verify_certificate(cert2)
 
-        assert verified1.identity == verified2.identity
-        assert verified1.verify_key == verified2.verify_key
-        assert verified1.signature != verified2.signature
+        self.assertEqual(verified1.identity, verified2.identity)
+        self.assertEqual(verified1.verify_key, verified2.verify_key)
+        self.assertNotEqual(verified1.signature, verified2.signature)
 
-    def test_challenge_expiry(self, ca: CertificateAuthority) -> None:
+    def test_challenge_expiry(self) -> None:
+        ca = CertificateAuthority()
         user_id = "alice"
         signing_key = SigningKey.generate()
         verify_key = signing_key.verify_key

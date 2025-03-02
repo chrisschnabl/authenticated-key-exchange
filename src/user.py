@@ -1,15 +1,13 @@
 import pickle
 import secrets
-from typing import Self, Optional, Union, TypeVar, Callable, cast, TypeGuard
-from functools import wraps
-from nacl.exceptions import CryptoError
-from nacl.public import PrivateKey, PublicKey
+from typing import Self, TypeVar
+
+from nacl.public import PrivateKey
 from nacl.secret import SecretBox
 from nacl.signing import SigningKey
 from pydantic import BaseModel, ConfigDict
-from session import InitiatedSession, ReadySession, Session, WaitingSession
-from sigma.ca import Certificate, CertificateAuthority
-from crypto_utils import SymmetricKey, derive_key, sign_transcript, hmac
+
+from crypto_utils import SymmetricKey, derive_key, hmac, sign_transcript
 from messages import (
     SigmaMessage,
     SigmaMessage1,
@@ -17,10 +15,13 @@ from messages import (
     SigmaMessage3,
     SigmaResponderPayload,
 )
+from session import InitiatedSession, ReadySession, Session, WaitingSession
+from sigma.ca import Certificate, CertificateAuthority
 
-T = TypeVar('T', bound=Session)
+T = TypeVar("T", bound=Session)
 
-class VerifiedUser(BaseModel): # type: ignore
+
+class VerifiedUser(BaseModel):  # type: ignore
     identity: str
     ca: CertificateAuthority
     certificate: Certificate
@@ -52,17 +53,19 @@ class VerifiedUser(BaseModel): # type: ignore
     def get_typed_session(self, peer: str, session_type: type[T]) -> T:
         session = self.get_session(peer)
         if not isinstance(session, session_type):
-            raise ValueError(f"Session is in {type(session).__name__} state, not {session_type.__name__}")
+            raise ValueError(
+                f"Session is in {type(session).__name__} state, not {session_type.__name__}"
+            )
         return session
 
     def get_session_key(self, peer: str) -> SymmetricKey:
         return self.get_typed_session(peer, ReadySession).session_key
 
-    def receive(self, msg: SigmaMessage, sender: Self) -> Optional[SigmaMessage]:
+    def receive(self, msg: SigmaMessage, sender: Self) -> SigmaMessage | None:
         handlers = {
             SigmaMessage1: self.receive_msg1,
             SigmaMessage2: self.receive_msg2,
-            SigmaMessage3: self.receive_msg3
+            SigmaMessage3: self.receive_msg3,
         }
 
         for msg_type, handler in handlers.items():
@@ -81,12 +84,7 @@ class VerifiedUser(BaseModel): # type: ignore
 
         derived_key = derive_key(received_ephem, ephemeral_private)
 
-        transcript = (
-            received_ephem.encode() +
-            ephemeral_public.encode() +
-            received_nonce +
-            nonce
-        )
+        transcript = received_ephem.encode() + ephemeral_public.encode() + received_nonce + nonce
 
         payload = SigmaResponderPayload(
             nonce=nonce,
@@ -96,10 +94,7 @@ class VerifiedUser(BaseModel): # type: ignore
         )
 
         transcript_msg2 = (
-            ephemeral_public.encode() +
-            received_ephem.encode() +
-            nonce +
-            received_nonce
+            ephemeral_public.encode() + received_ephem.encode() + nonce + received_nonce
         )
 
         self.sessions[sender.identity] = WaitingSession(
@@ -129,15 +124,16 @@ class VerifiedUser(BaseModel): # type: ignore
 
     def send_secure_message(self, message: bytes, peer: str) -> None:
         ready_session = self.get_typed_session(peer, ReadySession)
-        encrypted = ready_session.encrypt_message(message)
-        # Network handling would go here
+        _ = ready_session.encrypt_message(message)
+        # TOOD
 
     def receive_secure_message(self, encrypted: bytes, sender: str) -> bytes:
         ready_session = self.get_typed_session(sender, ReadySession)
         plaintext: bytes = ready_session.decrypt_message(encrypted)
         return plaintext
 
-class User(BaseModel): # type: ignore
+
+class User(BaseModel):  # type: ignore
     identity: str
     ca: CertificateAuthority
     signing_key: SigningKey

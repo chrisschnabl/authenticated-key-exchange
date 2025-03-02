@@ -1,33 +1,30 @@
-import pytest
-from typing import Tuple, Dict, Any, cast
-import pickle
 import secrets
-from unittest.mock import MagicMock, patch, PropertyMock
+from typing import Any
+from unittest.mock import MagicMock, PropertyMock, patch
 
-from nacl.public import PrivateKey, PublicKey
-from nacl.secret import SecretBox
-from nacl.signing import SigningKey, VerifyKey
+import pytest
 from nacl.exceptions import CryptoError
+from nacl.public import PrivateKey, PublicKey
+from nacl.signing import SigningKey, VerifyKey
 
-from session import Session, InitiatedSession, WaitingSession, ReadySession
+from messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
+from session import InitiatedSession, ReadySession, WaitingSession
 from sigma.ca import Certificate, CertificateAuthority
-from messages import SigmaMessage2, SigmaMessage3, SigmaInitiatorPayload, SigmaResponderPayload
-from crypto_utils import SymmetricKey, derive_key, sign_transcript, verify_signature, hmac
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def ca() -> CertificateAuthority:
     ca = MagicMock(spec=CertificateAuthority)
     ca.verify_certificate.return_value = MagicMock(spec=Certificate)
     return ca
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def verify_key() -> VerifyKey:
     return SigningKey.generate().verify_key
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def certificate(verify_key: VerifyKey) -> Certificate:
     cert = MagicMock(spec=Certificate)
     cert.identity = "test_identity"
@@ -36,30 +33,36 @@ def certificate(verify_key: VerifyKey) -> Certificate:
     return cert
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def signing_key() -> SigningKey:
     return SigningKey.generate()
 
 
-@pytest.fixture # type: ignore
-def ephemeral_key_pair() -> Tuple[PrivateKey, PublicKey]:
+@pytest.fixture  # type: ignore
+def ephemeral_key_pair() -> tuple[PrivateKey, PublicKey]:
     private = PrivateKey.generate()
     return private, private.public_key
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def nonce() -> bytes:
     return secrets.token_bytes(16)
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def derived_key() -> bytes:
     # Create a 32-byte key for SecretBox
     return secrets.token_bytes(32)
 
 
-@pytest.fixture # type: ignore
-def initiated_session(ca: CertificateAuthority, certificate: Certificate, signing_key: SigningKey, ephemeral_key_pair: Tuple[PrivateKey, PublicKey], nonce: bytes) -> InitiatedSession:
+@pytest.fixture  # type: ignore
+def initiated_session(
+    ca: CertificateAuthority,
+    certificate: Certificate,
+    signing_key: SigningKey,
+    ephemeral_key_pair: tuple[PrivateKey, PublicKey],
+    nonce: bytes,
+) -> InitiatedSession:
     private, public = ephemeral_key_pair
     return InitiatedSession(
         ca=ca,
@@ -67,47 +70,45 @@ def initiated_session(ca: CertificateAuthority, certificate: Certificate, signin
         signing_key=signing_key,
         ephemeral_private=private,
         ephemeral_public=public,
-        nonce=nonce
+        nonce=nonce,
     )
 
 
-@pytest.fixture # type: ignore
-def waiting_session(ca: CertificateAuthority, certificate: Certificate, derived_key: bytes) -> WaitingSession:
+@pytest.fixture  # type: ignore
+def waiting_session(
+    ca: CertificateAuthority, certificate: Certificate, derived_key: bytes
+) -> WaitingSession:
     return WaitingSession(
         ca=ca,
         transcript=b"test_transcript",
         derived_key=derived_key,
-        responder_certificate=certificate
+        responder_certificate=certificate,
     )
 
 
-@pytest.fixture # type: ignore
+@pytest.fixture  # type: ignore
 def ready_session(certificate: Certificate) -> ReadySession:
-    return ReadySession(
-        session_key=secrets.token_bytes(32),
-        peer_certificate=certificate
-    )
+    return ReadySession(session_key=secrets.token_bytes(32), peer_certificate=certificate)
 
 
 class TestReadySession:
     def test_creation(self, certificate: Certificate) -> None:
         session_key = secrets.token_bytes(32)
-        session = ReadySession(
-            session_key=session_key,
-            peer_certificate=certificate
-        )
+        session = ReadySession(session_key=session_key, peer_certificate=certificate)
 
         assert session.session_key == session_key
         assert session.peer_certificate == certificate
 
 
 class TestWaitingSession:
-    def test_creation(self, ca: CertificateAuthority, certificate: Certificate, derived_key: bytes) -> None:
+    def test_creation(
+        self, ca: CertificateAuthority, certificate: Certificate, derived_key: bytes
+    ) -> None:
         session = WaitingSession(
             ca=ca,
             transcript=b"test_transcript",
             derived_key=derived_key,
-            responder_certificate=certificate
+            responder_certificate=certificate,
         )
 
         assert session.ca == ca
@@ -115,19 +116,24 @@ class TestWaitingSession:
         assert session.derived_key == derived_key
         assert session.responder_certificate == certificate
 
-    def test_receive_message3_success(self, waiting_session: WaitingSession, certificate: Certificate, verify_key: VerifyKey, derived_key: bytes) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac:
-
+    def test_receive_message3_success(
+        self,
+        waiting_session: WaitingSession,
+        certificate: Certificate,
+        verify_key: VerifyKey,
+        derived_key: bytes,
+    ) -> None:
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+        ):
             mock_decrypt.return_value = b"decrypted_payload"
 
             initiator_payload = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature",
-                mac=b"test_mac"
+                certificate=certificate, signature=b"test_signature", mac=b"test_mac"
             )
             mock_loads.return_value = initiator_payload
 
@@ -151,16 +157,17 @@ class TestWaitingSession:
             mock_loads.assert_called_once_with(b"decrypted_payload")
             waiting_session.ca.verify_certificate.assert_called_once_with(certificate)
             mock_verify.assert_called_once_with(
-                certificate.verify_key,
-                waiting_session.transcript,
-                b"test_signature"
+                certificate.verify_key, waiting_session.transcript, b"test_signature"
             )
-            mock_hmac.assert_called_once_with(waiting_session.transcript, waiting_session.derived_key)
+            mock_hmac.assert_called_once_with(
+                waiting_session.transcript, waiting_session.derived_key
+            )
 
     def test_receive_message3_decryption_error(self, waiting_session: WaitingSession) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt:
-
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+        ):
             mock_decrypt.side_effect = CryptoError()
 
             msg3 = SigmaMessage3(encrypted_payload=b"encrypted_payload")
@@ -168,39 +175,43 @@ class TestWaitingSession:
             with pytest.raises(ValueError, match="Decryption of message 3 failed"):
                 waiting_session.receive_message3(msg3)
 
-    def test_receive_message3_invalid_certificate(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads:
-
+    def test_receive_message3_invalid_certificate(
+        self, waiting_session: WaitingSession, certificate: Certificate
+    ) -> None:
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+        ):
             mock_decrypt.return_value = b"decrypted_payload"
 
             initiator_payload = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature",
-                mac=b"test_mac"
+                certificate=certificate, signature=b"test_signature", mac=b"test_mac"
             )
             mock_loads.return_value = initiator_payload
 
-            waiting_session.ca.verify_certificate.side_effect = ValueError("Certificate validation failed")
+            waiting_session.ca.verify_certificate.side_effect = ValueError(
+                "Certificate validation failed"
+            )
 
             msg3 = SigmaMessage3(encrypted_payload=b"encrypted_payload")
 
             with pytest.raises(ValueError, match="Certificate validation failed"):
                 waiting_session.receive_message3(msg3)
 
-    def test_receive_message3_invalid_signature(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify:
-
+    def test_receive_message3_invalid_signature(
+        self, waiting_session: WaitingSession, certificate: Certificate
+    ) -> None:
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+        ):
             mock_decrypt.return_value = b"decrypted_payload"
 
             initiator_payload = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature",
-                mac=b"test_mac"
+                certificate=certificate, signature=b"test_signature", mac=b"test_mac"
             )
             mock_loads.return_value = initiator_payload
 
@@ -214,19 +225,20 @@ class TestWaitingSession:
             with pytest.raises(ValueError, match="Initiator signature verification failed"):
                 waiting_session.receive_message3(msg3)
 
-    def test_receive_message3_invalid_mac(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac:
-
+    def test_receive_message3_invalid_mac(
+        self, waiting_session: WaitingSession, certificate: Certificate
+    ) -> None:
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+        ):
             mock_decrypt.return_value = b"decrypted_payload"
 
             initiator_payload = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature",
-                mac=b"test_mac"
+                certificate=certificate, signature=b"test_signature", mac=b"test_mac"
             )
             mock_loads.return_value = initiator_payload
 
@@ -244,7 +256,14 @@ class TestWaitingSession:
 
 
 class TestInitiatedSession:
-    def test_creation(self, ca: CertificateAuthority, certificate: Certificate, signing_key: SigningKey, ephemeral_key_pair: Tuple[PrivateKey, PublicKey], nonce: bytes) -> None:
+    def test_creation(
+        self,
+        ca: CertificateAuthority,
+        certificate: Certificate,
+        signing_key: SigningKey,
+        ephemeral_key_pair: tuple[PrivateKey, PublicKey],
+        nonce: bytes,
+    ) -> None:
         private, public = ephemeral_key_pair
 
         session = InitiatedSession(
@@ -253,7 +272,7 @@ class TestInitiatedSession:
             signing_key=signing_key,
             ephemeral_private=private,
             ephemeral_public=public,
-            nonce=nonce
+            nonce=nonce,
         )
 
         assert session.ca == ca
@@ -263,17 +282,20 @@ class TestInitiatedSession:
         assert session.ephemeral_public == public
         assert session.nonce == nonce
 
-    def test_receive_message2_success(self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac, \
-             patch("session.sign_transcript") as mock_sign, \
-             patch("session.pickle.dumps") as mock_dumps, \
-             patch("session.SecretBox.encrypt") as mock_encrypt:
-
+    def test_receive_message2_success(
+        self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+            patch("session.sign_transcript") as mock_sign,
+            patch("session.pickle.dumps") as mock_dumps,
+            patch("session.SecretBox.encrypt") as mock_encrypt,
+        ):
             # Setup mocks
             derived_key = secrets.token_bytes(32)
             mock_derive.return_value = derived_key
@@ -284,7 +306,7 @@ class TestInitiatedSession:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
@@ -304,8 +326,7 @@ class TestInitiatedSession:
             mock_encrypt.return_value = b"encrypted_payload"
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             msg3, ready_session = initiated_session.receive_message2(msg2)
@@ -329,28 +350,31 @@ class TestInitiatedSession:
             mock_encrypt.assert_called_once_with(b"payload_bytes")
 
     def test_receive_message2_decryption_error(self, initiated_session: InitiatedSession) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt:
-
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             mock_decrypt.side_effect = CryptoError()
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             with pytest.raises(ValueError, match="Decryption failed"):
                 initiated_session.receive_message2(msg2)
 
-    def test_receive_message2_certificate_error(self, initiated_session: InitiatedSession, certificate: Certificate) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads:
-
+    def test_receive_message2_certificate_error(
+        self, initiated_session: InitiatedSession, certificate: Certificate
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             mock_decrypt.return_value = b"decrypted_payload"
@@ -359,27 +383,31 @@ class TestInitiatedSession:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
-            initiated_session.ca.verify_certificate.side_effect = ValueError("Certificate validation failed")
+            initiated_session.ca.verify_certificate.side_effect = ValueError(
+                "Certificate validation failed"
+            )
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             with pytest.raises(ValueError, match="Certificate validation failed"):
                 initiated_session.receive_message2(msg2)
 
-    def test_receive_message2_signature_error(self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify:
-
+    def test_receive_message2_signature_error(
+        self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             mock_decrypt.return_value = b"decrypted_payload"
@@ -388,7 +416,7 @@ class TestInitiatedSession:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
@@ -398,21 +426,23 @@ class TestInitiatedSession:
             mock_verify.return_value = False
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             with pytest.raises(ValueError, match="Responder signature verification failed"):
                 initiated_session.receive_message2(msg2)
 
-    def test_receive_message2_mac_error(self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac:
-
+    def test_receive_message2_mac_error(
+        self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             mock_decrypt.return_value = b"decrypted_payload"
@@ -421,7 +451,7 @@ class TestInitiatedSession:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
@@ -435,8 +465,7 @@ class TestInitiatedSession:
             mock_hmac.return_value = b"different_mac"
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             with pytest.raises(ValueError, match="Responder MAC verification failed"):
@@ -450,7 +479,7 @@ class TestIntegration:
         bob_ca = MagicMock(spec=CertificateAuthority)
 
         alice_key = SigningKey.generate()
-        bob_key = SigningKey.generate()
+        _ = SigningKey.generate()
 
         alice_cert = MagicMock(spec=Certificate)
         alice_cert.identity = "alice"
@@ -470,16 +499,17 @@ class TestIntegration:
         bob_nonce = secrets.token_bytes(16)
 
         # Mock calls to crypto functions
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.sign_transcript") as mock_sign, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac, \
-             patch("session.pickle.dumps") as mock_dumps, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.encrypt") as mock_encrypt, \
-             patch("session.SecretBox.decrypt") as mock_decrypt:
-
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.sign_transcript") as mock_sign,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+            patch("session.pickle.dumps") as ,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.encrypt") as mock_encrypt,
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+        ):
             derived_key = secrets.token_bytes(32)
             mock_derive.return_value = derived_key
 
@@ -493,13 +523,13 @@ class TestIntegration:
                 nonce=bob_nonce,
                 certificate=bob_cert,
                 signature=b"bob_signature",
-                mac=b"mac"  # Match the return value of mock_hmac
+                mac=b"mac",  # Match the return value of mock_hmac
             )
 
             initiator_payload = SigmaInitiatorPayload(
                 certificate=alice_cert,
                 signature=b"alice_signature",
-                mac=b"mac"  # Match the return value of mock_hmac
+                mac=b"mac",  # Match the return value of mock_hmac
             )
 
             alice_ca.verify_certificate = MagicMock(return_value=alice_cert)
@@ -509,8 +539,8 @@ class TestIntegration:
             def mock_loads_side_effect(data: bytes) -> Any:
                 if mock_decrypt.call_count == 1:  # First decrypt call is for message 2
                     return responder_payload
-                else:  # Second call is for message 3
-                    return initiator_payload
+                # Second call is for message 3
+                return initiator_payload
 
             mock_loads.side_effect = mock_loads_side_effect
 
@@ -520,12 +550,11 @@ class TestIntegration:
                 signing_key=alice_key,
                 ephemeral_private=alice_ephemeral_private,
                 ephemeral_public=alice_ephemeral_public,
-                nonce=alice_nonce
+                nonce=alice_nonce,
             )
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=bob_ephemeral_public,
-                encrypted_payload=b"encrypted_responder_payload"
+                ephemeral_pub=bob_ephemeral_public, encrypted_payload=b"encrypted_responder_payload"
             )
 
             msg3, alice_ready = alice_session.receive_message2(msg2)
@@ -535,17 +564,17 @@ class TestIntegration:
             assert alice_ready.session_key == derived_key
 
             bob_transcript = (
-                bob_ephemeral_public.encode() +
-                alice_ephemeral_public.encode() +
-                bob_nonce +
-                alice_nonce
+                bob_ephemeral_public.encode()
+                + alice_ephemeral_public.encode()
+                + bob_nonce
+                + alice_nonce
             )
 
             bob_session = WaitingSession(
                 ca=bob_ca,
                 transcript=bob_transcript,
                 derived_key=derived_key,
-                responder_certificate=bob_cert
+                responder_certificate=bob_cert,
             )
 
             # Bob processes message 3
@@ -559,17 +588,20 @@ class TestIntegration:
 
 
 class TestStateTransitionAttacks:
-    def test_skip_certificate_validation(self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac, \
-             patch("session.sign_transcript") as mock_sign, \
-             patch("session.pickle.dumps") as mock_dumps, \
-             patch("session.SecretBox.encrypt") as mock_encrypt:
-
+    def test_skip_certificate_validation(
+        self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+            patch("session.sign_transcript") as mock_sign,
+            patch("session.pickle.dumps") as mock_dumps,
+            patch("session.SecretBox.encrypt") as mock_encrypt,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             mock_decrypt.return_value = b"decrypted_payload"
@@ -578,7 +610,7 @@ class TestStateTransitionAttacks:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
@@ -597,8 +629,7 @@ class TestStateTransitionAttacks:
             mock_encrypt.return_value = b"encrypted_payload"
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             msg3, ready_session = initiated_session.receive_message2(msg2)
@@ -607,19 +638,20 @@ class TestStateTransitionAttacks:
             assert isinstance(ready_session, ReadySession)
             assert ready_session.session_key is not None
 
-    def test_modified_transcript(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac:
-
+    def test_modified_transcript(
+        self, waiting_session: WaitingSession, certificate: Certificate
+    ) -> None:
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+        ):
             mock_decrypt.return_value = b"decrypted_payload"
 
             initiator_payload = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature",
-                mac=b"test_mac"
+                certificate=certificate, signature=b"test_signature", mac=b"test_mac"
             )
             mock_loads.return_value = initiator_payload
 
@@ -635,17 +667,20 @@ class TestStateTransitionAttacks:
             with pytest.raises(ValueError, match="Initiator MAC verification failed"):
                 waiting_session.receive_message3(msg3)
 
-    def test_session_key_disclosure(self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac, \
-             patch("session.sign_transcript") as mock_sign, \
-             patch("session.pickle.dumps") as mock_dumps, \
-             patch("session.SecretBox.encrypt") as mock_encrypt:
-
+    def test_session_key_disclosure(
+        self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
+    ) -> None:
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+            patch("session.sign_transcript") as mock_sign,
+            patch("session.pickle.dumps") as mock_dumps,
+            patch("session.SecretBox.encrypt") as mock_encrypt,
+        ):
             # Normal flow setup
             derived_key = secrets.token_bytes(32)
             mock_derive.return_value = derived_key
@@ -656,7 +691,7 @@ class TestStateTransitionAttacks:
                 nonce=b"responder_nonce",
                 certificate=certificate,
                 signature=b"responder_signature",
-                mac=b"responder_mac"
+                mac=b"responder_mac",
             )
             mock_loads.return_value = responder_payload
 
@@ -670,29 +705,26 @@ class TestStateTransitionAttacks:
             mock_encrypt.return_value = b"encrypted_payload"
 
             msg2 = SigmaMessage2(
-                ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"encrypted_msg2"
+                ephemeral_pub=PrivateKey.generate().public_key, encrypted_payload=b"encrypted_msg2"
             )
 
             _, ready_session = initiated_session.receive_message2(msg2)
 
             attacker_session = ReadySession(
-                session_key=ready_session.session_key,
-                peer_certificate=certificate
+                session_key=ready_session.session_key, peer_certificate=certificate
             )
 
-            # If a protocol allowed easy session key extraction, this would succeed
-            # In our protocol, session keys are protected by the handshake
             assert attacker_session.session_key == ready_session.session_key
             assert attacker_session.peer_certificate == ready_session.peer_certificate
 
 
 class TestEncryptionAttacks:
     def test_tampering_with_encrypted_payload(self, initiated_session: InitiatedSession) -> None:
-        with patch("session.derive_key") as mock_derive, \
-             patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt:
-
+        with (
+            patch("session.derive_key") as mock_derive,
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+        ):
             mock_derive.return_value = secrets.token_bytes(32)
 
             # Simulate decryption failure due to tampering
@@ -700,24 +732,23 @@ class TestEncryptionAttacks:
 
             msg2 = SigmaMessage2(
                 ephemeral_pub=PrivateKey.generate().public_key,
-                encrypted_payload=b"tampered_payload"  # Not properly encrypted
+                encrypted_payload=b"tampered_payload",  # Not properly encrypted
             )
 
             with pytest.raises(ValueError, match="Decryption failed"):
                 initiated_session.receive_message2(msg2)
 
     def test_replay_attack(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
-        with patch("session.SecretBox.__init__", return_value=None), \
-             patch("session.SecretBox.decrypt") as mock_decrypt, \
-             patch("session.pickle.loads") as mock_loads, \
-             patch("session.verify_signature") as mock_verify, \
-             patch("session.hmac") as mock_hmac:
-
+        with (
+            patch("session.SecretBox.__init__", return_value=None),
+            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("session.pickle.loads") as mock_loads,
+            patch("session.verify_signature") as mock_verify,
+            patch("session.hmac") as mock_hmac,
+        ):
             # First message with valid nonce
             initiator_payload1 = SigmaInitiatorPayload(
-                certificate=certificate,
-                signature=b"test_signature1",
-                mac=b"test_mac1"
+                certificate=certificate, signature=b"test_signature1", mac=b"test_mac1"
             )
 
             # Attacker replaying with different certificate
@@ -729,7 +760,7 @@ class TestEncryptionAttacks:
             initiator_payload2 = SigmaInitiatorPayload(
                 certificate=attacker_cert,
                 signature=b"test_signature1",  # Reused signature
-                mac=b"test_mac1"  # Reused MAC
+                mac=b"test_mac1",  # Reused MAC
             )
 
             mock_decrypt.return_value = b"first_decrypt"
@@ -748,7 +779,7 @@ class TestEncryptionAttacks:
                 ca=waiting_session.ca,
                 transcript=waiting_session.transcript,
                 derived_key=waiting_session.derived_key,
-                responder_certificate=waiting_session.responder_certificate
+                responder_certificate=waiting_session.responder_certificate,
             )
 
             mock_decrypt.return_value = b"replay_decrypt"

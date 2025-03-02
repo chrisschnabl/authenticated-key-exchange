@@ -1,19 +1,22 @@
-from typing import Tuple, TypeVar, Generic, cast
-from pydantic import BaseModel, ConfigDict
-from crypto_utils import SymmetricKey
-from sigma.ca import Certificate, CertificateAuthority
-from nacl.public import PrivateKey, PublicKey
-from nacl.exceptions import CryptoError
-from nacl.secret import SecretBox
-from nacl.signing import SigningKey, VerifyKey
-from crypto_utils import derive_key, sign_transcript, verify_signature, hmac
-from messages import SigmaInitiatorPayload, SigmaResponderPayload, SigmaMessage2, SigmaMessage3
 import pickle
+from typing import TypeVar
 
-T = TypeVar('T', bound='Session')
+from nacl.exceptions import CryptoError
+from nacl.public import PrivateKey, PublicKey
+from nacl.secret import SecretBox
+from nacl.signing import SigningKey
+from pydantic import BaseModel, ConfigDict
 
-class Session(BaseModel): # type: ignore
+from crypto_utils import SymmetricKey, derive_key, hmac, sign_transcript, verify_signature
+from messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
+from sigma.ca import Certificate, CertificateAuthority
+
+T = TypeVar("T", bound="Session")
+
+
+class Session(BaseModel):  # type: ignore
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
 class ReadySession(Session):
     session_key: SymmetricKey
@@ -29,6 +32,7 @@ class ReadySession(Session):
         decrypted: bytes = box.decrypt(encrypted)
         return decrypted
 
+
 class InitiatedSession(Session):
     ca: CertificateAuthority
     certificate: Certificate
@@ -37,7 +41,7 @@ class InitiatedSession(Session):
     ephemeral_public: PublicKey
     nonce: bytes
 
-    def receive_message2(self, msg2: SigmaMessage2) -> Tuple[SigmaMessage3, ReadySession]:
+    def receive_message2(self, msg2: SigmaMessage2) -> tuple[SigmaMessage3, ReadySession]:
         responder_ephem: PublicKey = msg2.ephemeral_pub
         derived_key: SymmetricKey = derive_key(responder_ephem, self.ephemeral_private)
 
@@ -51,27 +55,17 @@ class InitiatedSession(Session):
         verified_cert = self.ca.verify_certificate(payload.certificate)
 
         transcript = (
-            self.ephemeral_public.encode() +
-            responder_ephem.encode() +
-            self.nonce +
-            payload.nonce
+            self.ephemeral_public.encode() + responder_ephem.encode() + self.nonce + payload.nonce
         )
 
-        if not verify_signature(
-            verified_cert.verify_key,
-            transcript,
-            payload.signature
-        ):
+        if not verify_signature(verified_cert.verify_key, transcript, payload.signature):
             raise ValueError("Responder signature verification failed")
 
         if hmac(transcript, derived_key) != payload.mac:
             raise ValueError("Responder MAC verification failed")
 
         transcript2 = (
-            responder_ephem.encode() +
-            self.ephemeral_public.encode() +
-            payload.nonce +
-            self.nonce
+            responder_ephem.encode() + self.ephemeral_public.encode() + payload.nonce + self.nonce
         )
 
         initiator_sig = sign_transcript(self.signing_key, transcript2)
@@ -111,11 +105,7 @@ class WaitingSession(Session):
         payload: SigmaInitiatorPayload = pickle.loads(plaintext)
         verified_cert = self.ca.verify_certificate(payload.certificate)
 
-        if not verify_signature(
-            verified_cert.verify_key,
-            self.transcript,
-            payload.signature
-        ):
+        if not verify_signature(verified_cert.verify_key, self.transcript, payload.signature):
             raise ValueError("Initiator signature verification failed")
 
         expected_mac = hmac(self.transcript, self.derived_key)
