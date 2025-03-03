@@ -6,10 +6,10 @@ from nacl.public import PrivateKey, PublicKey
 from nacl.signing import SigningKey, VerifyKey
 from parameterized import parameterized
 
-from messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
-from session import InitiatedSession, ReadySession, WaitingSession
+from sigma.messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
+from sigma.session import InitiatedSession, ReadySession, WaitingSession
 from sigma.ca import Certificate, CertificateAuthority
-from user import User, VerifiedUser
+from sigma.user import User, VerifiedUser
 
 
 @pytest.fixture
@@ -307,8 +307,8 @@ class TestHandshakeInitiation(BaseTest):
 
     def test_initiate_handshake(self):
         with (
-            patch("user.PrivateKey.generate") as mock_generate,
-            patch("user.secrets.token_bytes") as mock_token_bytes,
+            patch("sigma.user.PrivateKey.generate") as mock_generate,
+            patch("sigma.user.secrets.token_bytes") as mock_token_bytes,
         ):
             mock_private_key = MagicMock(spec=PrivateKey)
             mock_public_key = MagicMock(spec=PublicKey)

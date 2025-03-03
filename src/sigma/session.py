@@ -8,7 +8,7 @@ from nacl.signing import SigningKey
 from pydantic import BaseModel, ConfigDict
 
 from crypto_utils import SymmetricKey, derive_key, hmac, sign_transcript, verify_signature
-from messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
+from sigma.messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
 from sigma.ca import Certificate, CertificateAuthority
 
 T = TypeVar("T", bound="Session")

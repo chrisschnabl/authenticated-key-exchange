@@ -7,7 +7,7 @@ from nacl.public import PrivateKey
 from nacl.signing import VerifyKey
 from pydantic import ValidationError
 
-from messages import (
+from sigma.messages import (
     SigmaInitiatorPayload,
     SigmaMessage,
     SigmaMessage1,

@@ -7,8 +7,8 @@ from nacl.exceptions import CryptoError
 from nacl.public import PrivateKey, PublicKey
 from nacl.signing import SigningKey, VerifyKey
 
-from messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
-from session import InitiatedSession, ReadySession, WaitingSession
+from sigma.messages import SigmaInitiatorPayload, SigmaMessage2, SigmaMessage3, SigmaResponderPayload
+from sigma.session import InitiatedSession, ReadySession, WaitingSession
 from sigma.ca import Certificate, CertificateAuthority
 
 
@@ -124,11 +124,11 @@ class TestWaitingSession:
         derived_key: bytes,
     ) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
         ):
             mock_decrypt.return_value = b"decrypted_payload"
 
@@ -165,8 +165,8 @@ class TestWaitingSession:
 
     def test_receive_message3_decryption_error(self, waiting_session: WaitingSession) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
         ):
             mock_decrypt.side_effect = CryptoError()
 
@@ -179,9 +179,9 @@ class TestWaitingSession:
         self, waiting_session: WaitingSession, certificate: Certificate
     ) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
         ):
             mock_decrypt.return_value = b"decrypted_payload"
 
@@ -203,10 +203,10 @@ class TestWaitingSession:
         self, waiting_session: WaitingSession, certificate: Certificate
     ) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
         ):
             mock_decrypt.return_value = b"decrypted_payload"
 
@@ -229,11 +229,11 @@ class TestWaitingSession:
         self, waiting_session: WaitingSession, certificate: Certificate
     ) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
         ):
             mock_decrypt.return_value = b"decrypted_payload"
 
@@ -286,15 +286,15 @@ class TestInitiatedSession:
         self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
-            patch("session.sign_transcript") as mock_sign,
-            patch("session.pickle.dumps") as mock_dumps,
-            patch("session.SecretBox.encrypt") as mock_encrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
+            patch("sigma.session.sign_transcript") as mock_sign,
+            patch("sigma.session.pickle.dumps") as mock_dumps,
+            patch("sigma.session.SecretBox.encrypt") as mock_encrypt,
         ):
             # Setup mocks
             derived_key = secrets.token_bytes(32)
@@ -351,9 +351,9 @@ class TestInitiatedSession:
 
     def test_receive_message2_decryption_error(self, initiated_session: InitiatedSession) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -370,10 +370,10 @@ class TestInitiatedSession:
         self, initiated_session: InitiatedSession, certificate: Certificate
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -402,11 +402,11 @@ class TestInitiatedSession:
         self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -436,12 +436,12 @@ class TestInitiatedSession:
         self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -500,15 +500,15 @@ class TestIntegration:
 
         # Mock calls to crypto functions
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.sign_transcript") as mock_sign,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
-            patch("session.pickle.dumps") as _,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.encrypt") as mock_encrypt,
-            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.sign_transcript") as mock_sign,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
+            patch("sigma.session.pickle.dumps") as _,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.encrypt") as mock_encrypt,
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
         ):
             derived_key = secrets.token_bytes(32)
             mock_derive.return_value = derived_key
@@ -592,15 +592,15 @@ class TestStateTransitionAttacks:
         self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
-            patch("session.sign_transcript") as mock_sign,
-            patch("session.pickle.dumps") as mock_dumps,
-            patch("session.SecretBox.encrypt") as mock_encrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
+            patch("sigma.session.sign_transcript") as mock_sign,
+            patch("sigma.session.pickle.dumps") as mock_dumps,
+            patch("sigma.session.SecretBox.encrypt") as mock_encrypt,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -642,11 +642,11 @@ class TestStateTransitionAttacks:
         self, waiting_session: WaitingSession, certificate: Certificate
     ) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
         ):
             mock_decrypt.return_value = b"decrypted_payload"
 
@@ -671,15 +671,15 @@ class TestStateTransitionAttacks:
         self, initiated_session: InitiatedSession, certificate: Certificate, verify_key: VerifyKey
     ) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
-            patch("session.sign_transcript") as mock_sign,
-            patch("session.pickle.dumps") as mock_dumps,
-            patch("session.SecretBox.encrypt") as mock_encrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
+            patch("sigma.session.sign_transcript") as mock_sign,
+            patch("sigma.session.pickle.dumps") as mock_dumps,
+            patch("sigma.session.SecretBox.encrypt") as mock_encrypt,
         ):
             # Normal flow setup
             derived_key = secrets.token_bytes(32)
@@ -721,9 +721,9 @@ class TestStateTransitionAttacks:
 class TestEncryptionAttacks:
     def test_tampering_with_encrypted_payload(self, initiated_session: InitiatedSession) -> None:
         with (
-            patch("session.derive_key") as mock_derive,
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.derive_key") as mock_derive,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
         ):
             mock_derive.return_value = secrets.token_bytes(32)
 
@@ -740,11 +740,11 @@ class TestEncryptionAttacks:
 
     def test_replay_attack(self, waiting_session: WaitingSession, certificate: Certificate) -> None:
         with (
-            patch("session.SecretBox.__init__", return_value=None),
-            patch("session.SecretBox.decrypt") as mock_decrypt,
-            patch("session.pickle.loads") as mock_loads,
-            patch("session.verify_signature") as mock_verify,
-            patch("session.hmac") as mock_hmac,
+            patch("sigma.session.SecretBox.__init__", return_value=None),
+            patch("sigma.session.SecretBox.decrypt") as mock_decrypt,
+            patch("sigma.session.pickle.loads") as mock_loads,
+            patch("sigma.session.verify_signature") as mock_verify,
+            patch("sigma.session.hmac") as mock_hmac,
         ):
             # First message with valid nonce
             initiator_payload1 = SigmaInitiatorPayload(

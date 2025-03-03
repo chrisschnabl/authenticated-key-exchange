@@ -8,14 +8,14 @@ from nacl.signing import SigningKey
 from pydantic import BaseModel, ConfigDict
 
 from crypto_utils import SymmetricKey, derive_key, hmac, sign_transcript
-from messages import (
+from sigma.messages import (
     SigmaMessage,
     SigmaMessage1,
     SigmaMessage2,
     SigmaMessage3,
     SigmaResponderPayload,
 )
-from session import InitiatedSession, ReadySession, Session, WaitingSession
+from sigma.session import InitiatedSession, ReadySession, Session, WaitingSession
 from sigma.ca import Certificate, CertificateAuthority
 
 T = TypeVar("T", bound=Session)
@@ -122,10 +122,10 @@ class VerifiedUser(BaseModel):  # type: ignore
         self.sessions[sender.identity] = ready_session
         return None
 
-    def send_secure_message(self, message: bytes, peer: str) -> None:
+    def send_secure_message(self, message: bytes, peer: str) -> bytes:
         ready_session = self.get_typed_session(peer, ReadySession)
-        _ = ready_session.encrypt_message(message)
-        # TOOD
+        msg: bytes = ready_session.encrypt_message(message)
+        return msg
 
     def receive_secure_message(self, encrypted: bytes, sender: str) -> bytes:
         ready_session = self.get_typed_session(sender, ReadySession)

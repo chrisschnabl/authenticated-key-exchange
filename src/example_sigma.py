@@ -1,13 +1,12 @@
 from nacl.signing import SigningKey
 
-from messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
+from sigma.messages import SigmaMessage1, SigmaMessage2, SigmaMessage3
 from network.simulated_network import SimulatedNetwork
 from sigma.ca import CertificateAuthority
-from user import User, VerifiedUser
+from sigma.user import User, VerifiedUser
 
 
 def main() -> None:
-    """Main function demonstrating the use of the SIGMA protocol."""
     print("=== SIGMA Protocol Demo ===")
 
     ca = CertificateAuthority()
@@ -35,7 +34,6 @@ def main() -> None:
     print("Alice received message 3 from Bob, message 3:")
     _ = bob.receive(alice_msg3, alice)
 
-    print("\n=== Session Information ===")
     print(
         f"Session key match: {alice.get_session_key(bob.identity) == bob.get_session_key(alice.identity)}"
     )
@@ -48,11 +46,16 @@ def main() -> None:
     print("Alice received message 3 from Charlie, message 3:")
     _ = charlie.receive(alice_msg5, alice)
 
-    print("\n=== Session Information ===")
     print(
         f"Session key match: {alice.get_session_key(charlie.identity) == charlie.get_session_key(alice.identity)}"
     )
 
+    msg = alice.send_secure_message(b"Hello, Bob!", bob.identity)
+    bob_msg = bob.receive_secure_message(msg, alice.identity)
+    print(f"Bob received message from Alice: {bob_msg}")
+
+
+    print("=== DEMO END ===")
 
 if __name__ == "__main__":
     main()

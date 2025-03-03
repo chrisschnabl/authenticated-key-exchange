@@ -6,4 +6,4 @@ WORKDIR $WORKDIR_PATH
 COPY ./src/ ./
 
 USER 1337
-CMD ["python", "-m", "example"]
+CMD ["python", "-m", "example_spake2"]
