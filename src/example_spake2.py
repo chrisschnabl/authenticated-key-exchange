@@ -20,6 +20,8 @@ if __name__ == "__main__":
     client_key = alice_confirmed.get_shared_key()
     server_key = bob_confirmed.get_shared_key()
 
+    # One could also easily use the Network here
+
     print(f"Protocol completed successfully: {True}")
     print(f"Shared keys match: {client_key.value.hex() == server_key.value.hex()}")
     print(f"Shared key: {client_key.value.hex()}")

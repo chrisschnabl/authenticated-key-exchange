@@ -20,21 +20,9 @@ def int_to_bytes(i: int, length: int = 32) -> bytes:
 
 
 def sign_transcript(signing_key: SigningKey, transcript: bytes) -> Signature:
-    """
-    Signs the given transcript using the provided signing key.
-    Returns the signature bytes.
-    """
     return signing_key.sign(transcript).signature  # type: ignore
 
-
-# TODO CS: type this in a way where we it is marhsalled
-
-
 def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: Signature) -> bool:
-    """
-    Verifies the signature on the transcript using the provided verify key.
-    Returns True if the signature is valid; otherwise, False.
-    """
     try:
         verify_key.verify(transcript, signature)
         return True

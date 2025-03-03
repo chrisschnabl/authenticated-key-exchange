@@ -1,5 +1,11 @@
 # P079 Lab 02
 
+Make sure to have commit-hooks installed for typing, linting, tests
+
+```
+pre-commit install
+```
+
 # Run
 
 ## Typing
