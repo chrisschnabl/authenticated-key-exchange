@@ -32,7 +32,7 @@ def verify_signature(verify_key: VerifyKey, transcript: bytes, signature: Signat
 
 def derive_key(
     ephemeral_public: PublicKey, ephemeral_private: PrivateKey
-) -> SymmetricKey:  # TODO CS: use typing here
+) -> SymmetricKey:
     shared_secret = crypto_scalarmult(ephemeral_private.encode(), ephemeral_public.encode())
     return sha256(shared_secret)[:32]  # type: ignore
 

@@ -11,9 +11,7 @@ class Certificate(BaseModel):  # type: ignore
     # We do not keep issuer info as we only have one CA
     identity: str
     verify_key: VerifyKey
-    signature: (
-        Signature  # TODO CS: Keep this as SIgnature, todo veriyfy the length, needs to be 64 bytes
-    )
+    signature: Signature
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -36,11 +34,10 @@ class CertificateAuthority:
         challenge = secrets.token_bytes(32)
         self._challenges_pending[user] = challenge
         return challenge
-        # return SecretBox(self._signing_key.encode()).encrypt(challenge)
-        # TODO CS AE
+        # If we wanted, we could easily add AEAD here
+        #  SecretBox(self._signing_key.encode()).encrypt(challenge)
 
     def issue_certificate(self, user: str, signature: bytes, verify_key: VerifyKey) -> Certificate:
-        # Verifies that the signature is a valid signature of the challenge using the provided public key.
         if user not in self._challenges_pending:
             raise ValueError("User has not requested a challenge")
 
@@ -60,9 +57,6 @@ class CertificateAuthority:
             signature=cert_signature,
         )
         self._verified_users[user] = verify_key
-        # TODO CS: encrypt this with the user's public key using pickle
-        # payload = pickle.dumps(certificate)
-        # return SecretBox(verify_key.encode()).encrypt(payload)
         return certificate
 
     def verify_certificate(self, cert: Certificate) -> VerifiedCertificate:
