@@ -198,15 +198,11 @@ class TestSessionState(BaseTest):
 
         self.verified_user.sessions["peer1"] = initiated_session
 
-        if hasattr(self.verified_user, "receive_msg2"):
-            mock_sender = MagicMock()
-            mock_sender.identity = "peer1"
-            self.verified_user.receive_msg2(msg2, mock_sender)
+        self.verified_user.receive_msg2(msg2, "peer1")
 
-            initiated_session.receive_message2.assert_called_once_with(msg2)
-            self.assertEqual(self.verified_user.sessions["peer1"], ready_session)
-        else:
-            pytest.skip("verified_user does not have receive_msg2 method")
+        initiated_session.receive_message2.assert_called_once_with(msg2)
+        self.assertEqual(self.verified_user.sessions["peer1"], ready_session)
+
 
     def test_waiting_to_ready_transition(self):
         waiting_session = MagicMock(spec=WaitingSession)
@@ -217,62 +213,49 @@ class TestSessionState(BaseTest):
         msg3 = MagicMock(spec=SigmaMessage3)
         self.verified_user.sessions["peer1"] = waiting_session
 
-        if hasattr(self.verified_user, "receive_msg3"):
-            mock_sender = MagicMock()
-            mock_sender.identity = "peer1"
-            self.verified_user.receive_msg3(msg3, mock_sender)
+        self.verified_user.receive_msg3(msg3, "peer1")
 
-            waiting_session.receive_message3.assert_called_once_with(msg3)
-            self.assertEqual(self.verified_user.sessions["peer1"], ready_session)
-        else:
-            pytest.skip("verified_user does not have receive_msg3 method")
+        waiting_session.receive_message3.assert_called_once_with(msg3)
+        self.assertEqual(self.verified_user.sessions["peer1"], ready_session)
 
 
 class TestMessageDispatch(BaseTest):
     fixtures = ["verified_user"]
 
     def test_receive_dispatches_correctly(self):
-        if not hasattr(self.verified_user, "receive"):
-            pytest.skip("verified_user does not have receive method")
 
         msg1 = MagicMock(spec=SigmaMessage1)
         msg2 = MagicMock(spec=SigmaMessage2)
         msg3 = MagicMock(spec=SigmaMessage3)
 
-        mock_sender = MagicMock()
-        mock_sender.identity = "sender"
 
         patches = []
 
-        if hasattr(self.verified_user, "receive_msg1"):
-            patches.append(
-                patch.object(
-                    self.verified_user.__class__,
-                    "receive_msg1",
-                    autospec=True,
-                    return_value="msg1_response",
+        patches.append(
+            patch.object(
+                self.verified_user.__class__,
+                "receive_msg1",
+                autospec=True,
+                return_value="msg1_response",
                 )
             )
 
-        if hasattr(self.verified_user, "receive_msg2"):
-            patches.append(
-                patch.object(
-                    self.verified_user.__class__,
-                    "receive_msg2",
-                    autospec=True,
-                    return_value="msg2_response",
-                )
-            )
 
-        if hasattr(self.verified_user, "receive_msg3"):
-            patches.append(
-                patch.object(
-                    self.verified_user.__class__, "receive_msg3", autospec=True, return_value=None
-                )
+        patches.append(
+            patch.object(
+                self.verified_user.__class__,
+                "receive_msg2",
+                autospec=True,
+                return_value="msg2_response",
             )
+        )
 
-        if not patches:
-            pytest.skip("No message handler methods found to test")
+        patches.append(
+            patch.object(
+                self.verified_user.__class__, "receive_msg3", autospec=True, return_value=None
+            )
+        )
+
 
         with patch.multiple(
             self.verified_user.__class__,
@@ -286,20 +269,17 @@ class TestMessageDispatch(BaseTest):
                 if hasattr(self.verified_user.__class__, method_name)
             },
         ):
-            if hasattr(self.verified_user.__class__, "receive_msg1"):
-                response1 = self.verified_user.receive(msg1, mock_sender)
-                self.verified_user.__class__.receive_msg1.assert_called_once()
-                self.assertEqual(response1, "msg1_response")
+            response1 = self.verified_user.receive(msg1, "peer1")
+            self.verified_user.__class__.receive_msg1.assert_called_once()
+            self.assertEqual(response1, "msg1_response")
 
-            if hasattr(self.verified_user.__class__, "receive_msg2"):
-                response2 = self.verified_user.receive(msg2, mock_sender)
-                self.verified_user.__class__.receive_msg2.assert_called_once()
-                self.assertEqual(response2, "msg2_response")
+            response2 = self.verified_user.receive(msg2, "peer1")
+            self.verified_user.__class__.receive_msg2.assert_called_once()
+            self.assertEqual(response2, "msg2_response")
 
-            if hasattr(self.verified_user.__class__, "receive_msg3"):
-                response3 = self.verified_user.receive(msg3, mock_sender)
-                self.verified_user.__class__.receive_msg3.assert_called_once()
-                self.assertIsNone(response3)
+            response3 = self.verified_user.receive(msg3, "peer1")
+            self.verified_user.__class__.receive_msg3.assert_called_once()
+            self.assertIsNone(response3)
 
 
 class TestHandshakeInitiation(BaseTest):

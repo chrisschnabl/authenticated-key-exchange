@@ -18,4 +18,7 @@ class SimulatedNetwork:
     def send_message(self, sender: str, receiver: str, message: BaseModel) -> None:
         if receiver not in self.users:
             raise ValueError(f"User {receiver} not found")
-        self.users[receiver](message, sender)
+        print(f"Network: sending message[{message.__class__.__name__}] from {sender} to {receiver}")
+        response = self.users[receiver](message, sender)
+        if response is not None:
+            self.send_message(receiver, sender, response)

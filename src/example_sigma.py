@@ -17,38 +17,35 @@ def main() -> None:
     charlie_signing_key = SigningKey.generate()
 
     alice: VerifiedUser = User(
-        identity="alice", ca=ca, signing_key=alice_signing_key, network=network
+        identity="alice", ca=ca, signing_key=alice_signing_key
     ).obtain_certificate()
     bob: VerifiedUser = User(
-        identity="bob", ca=ca, signing_key=bob_signing_key, network=network
+        identity="bob", ca=ca, signing_key=bob_signing_key
     ).obtain_certificate()
     charlie: VerifiedUser = User(
-        identity="charlie", ca=ca, signing_key=charlie_signing_key, network=network
+        identity="charlie", ca=ca, signing_key=charlie_signing_key
     ).obtain_certificate()
 
+    network.register_user(alice.identity, alice.receive)
+    network.register_user(bob.identity, bob.receive)
+    network.register_user(charlie.identity, charlie.receive)
+
     alice_msg1: SigmaMessage1 = alice.initiate_handshake(bob.identity)
-    print("Alice sent message 1 to Bob, message 1:")
-    bob_msg2: SigmaMessage2 = bob.receive(alice_msg1, alice)
-    print("Bob received message 2 from Alice, message 2:")
-    alice_msg3: SigmaMessage3 = alice.receive(bob_msg2, bob)
-    print("Alice received message 3 from Bob, message 3:")
-    _ = bob.receive(alice_msg3, alice)
+    alice_msg2: SigmaMessage2 = alice.initiate_handshake(charlie.identity)
+
+    print("=== Alice to Bob ===")
+    network.send_message(alice.identity, bob.identity, alice_msg1)
+    print("=== Alice to Charlie ===")
+    network.send_message(alice.identity, charlie.identity, alice_msg2)
+
 
     print(
         f"Session key match: {alice.get_session_key(bob.identity) == bob.get_session_key(alice.identity)}"
     )
-
-    alice_msg4: SigmaMessage1 = alice.initiate_handshake(charlie.identity)
-    print("Alice sent message 1 to Charlie, message 1:")
-    charlie_msg2: SigmaMessage2 = charlie.receive(alice_msg4, alice)
-    print("Charlie received message 2 from Alice, message 2:")
-    alice_msg5: SigmaMessage3 = alice.receive(charlie_msg2, charlie)
-    print("Alice received message 3 from Charlie, message 3:")
-    _ = charlie.receive(alice_msg5, alice)
-
     print(
         f"Session key match: {alice.get_session_key(charlie.identity) == charlie.get_session_key(alice.identity)}"
     )
+
 
     msg = alice.send_secure_message(b"Hello, Bob!", bob.identity)
     bob_msg = bob.receive_secure_message(msg, alice.identity)

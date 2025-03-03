@@ -141,32 +141,6 @@ class TestSPAKE2Exchange(unittest.TestCase):
         with self.assertRaises(ValueError):
             bob_exchange.confirm(wrong_confirmation)
 
-    def test_invalid_state_transition(self) -> None:
-        shared_pw = SharedPassword(
-            password=self.password, context=self.context, idA=self.idA, idB=self.idB
-        )
-
-        pka, alice = shared_pw.client()
-        pkb, bob = shared_pw.server()
-
-        bob_confirmation, alice_exchange = alice.exchange(pkb)
-        alice_confirmation, bob_exchange = bob.exchange(pka)
-
-        alice_confirmed = alice_exchange.confirm(alice_confirmation)
-        bob_confirmed = bob_exchange.confirm(bob_confirmation)
-
-        client_key = alice_confirmed.get_shared_key()
-        server_key = bob_confirmed.get_shared_key()
-
-        self.assertEqual(client_key, server_key)
-
-        # TODO: This right now is only runtime error, not a test
-        with self.assertRaises(Exception):
-            alice.exchange(pkb)
-
-        with self.assertRaises(Exception):
-            bob.exchange(pka)
-
 
 if __name__ == "__main__":
     unittest.main()

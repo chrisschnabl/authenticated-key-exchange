@@ -47,7 +47,7 @@ class VerifiedUser(BaseModel):  # type: ignore
 
     def get_session(self, peer: str) -> Session:
         if peer not in self.sessions:
-            raise ValueError("No session started with this peer")
+            raise ValueError(f"No session started with this peer {peer}")
         return self.sessions[peer]
 
     def get_typed_session(self, peer: str, session_type: type[T]) -> T:
@@ -61,12 +61,14 @@ class VerifiedUser(BaseModel):  # type: ignore
     def get_session_key(self, peer: str) -> SymmetricKey:
         return self.get_typed_session(peer, ReadySession).session_key
 
-    def receive(self, msg: SigmaMessage, sender: Self) -> SigmaMessage | None:
+    def receive(self, msg: SigmaMessage, sender: str) -> SigmaMessage | None:
         handlers = {
             SigmaMessage1: self.receive_msg1,
             SigmaMessage2: self.receive_msg2,
             SigmaMessage3: self.receive_msg3,
         }
+
+        print(f"User {self.identity}: received message[{msg.__class__.__name__}] from {sender}")
 
         for msg_type, handler in handlers.items():
             if isinstance(msg, msg_type):
@@ -74,7 +76,7 @@ class VerifiedUser(BaseModel):  # type: ignore
 
         raise ValueError(f"Unknown message type: {type(msg).__name__}")
 
-    def receive_msg1(self, msg1: SigmaMessage1, sender: Self) -> SigmaMessage2:
+    def receive_msg1(self, msg1: SigmaMessage1, sender: str) -> SigmaMessage2:
         received_ephem = msg1.ephemeral_pub
         received_nonce = msg1.nonce
 
@@ -97,7 +99,7 @@ class VerifiedUser(BaseModel):  # type: ignore
             ephemeral_public.encode() + received_ephem.encode() + nonce + received_nonce
         )
 
-        self.sessions[sender.identity] = WaitingSession(
+        self.sessions[sender] = WaitingSession(
             ca=self.ca,
             transcript=transcript_msg2,
             derived_key=derived_key,
@@ -110,16 +112,16 @@ class VerifiedUser(BaseModel):  # type: ignore
             encrypted_payload=SecretBox(derived_key).encrypt(plaintext),
         )
 
-    def receive_msg2(self, msg: SigmaMessage2, sender: Self) -> SigmaMessage3:
-        session = self.get_typed_session(sender.identity, InitiatedSession)
+    def receive_msg2(self, msg: SigmaMessage2, sender: str) -> SigmaMessage3:
+        session = self.get_typed_session(sender, InitiatedSession)
         msg3, ready_session = session.receive_message2(msg)
-        self.sessions[sender.identity] = ready_session
+        self.sessions[sender] = ready_session
         return msg3
 
-    def receive_msg3(self, msg: SigmaMessage3, sender: Self) -> None:
-        session = self.get_typed_session(sender.identity, WaitingSession)
+    def receive_msg3(self, msg: SigmaMessage3, sender: str) -> None:
+        session = self.get_typed_session(sender, WaitingSession)
         ready_session = session.receive_message3(msg)
-        self.sessions[sender.identity] = ready_session
+        self.sessions[sender] = ready_session
         return None
 
     def send_secure_message(self, message: bytes, peer: str) -> bytes:
