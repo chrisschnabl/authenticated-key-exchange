@@ -504,7 +504,7 @@ class TestIntegration:
             patch("session.sign_transcript") as mock_sign,
             patch("session.verify_signature") as mock_verify,
             patch("session.hmac") as mock_hmac,
-            patch("session.pickle.dumps") as ,
+            patch("session.pickle.dumps") as _,
             patch("session.pickle.loads") as mock_loads,
             patch("session.SecretBox.__init__", return_value=None),
             patch("session.SecretBox.encrypt") as mock_encrypt,
