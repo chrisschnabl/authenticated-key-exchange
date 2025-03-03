@@ -19,13 +19,15 @@ uv run mypy
 Requires `uv` to be installed.
 
 ```bash
-uv run src/example.py
+uv run src/example_sigma.py
+uv run src/example_spake2.py
 ```
 
 ## Dockerized
 
 ```bash
-./scripts/run.sh
+./scripts/run_sigma_example.sh
+./scripts/run_spake2_example.sh
 ```
 
 # Run tests
